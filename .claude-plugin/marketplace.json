@@ -1,0 +1,14 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "local-backlog",
+  "owner": {
+    "name": "lbecjx"
+  },
+  "plugins": [
+    {
+      "name": "local-backlog",
+      "description": "For projects without access to a cloud-based issue tracker: create and manage stories as plain Markdown files, with auto-incrementing ticket codes and a searchable local viewer (served on localhost via Python's built-in HTTP server — no third-party account, no cloud dependency). \"Local\" means no external service dependency, not necessarily private — files can be gitignored or committed with the rest of the repo, by choice.",
+      "source": "./"
+    }
+  ]
+}
