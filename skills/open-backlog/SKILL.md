@@ -134,8 +134,10 @@ nothing to regenerate when stories change.
 
 ## Notes
 
-- **The viewer app itself is never hand-edited from here.** It's a separate
-  React project; changes to its UI happen there, get built, and the resulting
+- **The viewer app itself is never hand-edited from here.** It's a separate,
+  independently versioned React project —
+  [`lbecjx/backlog-viewer`](https://github.com/lbecjx/backlog-viewer) — GPL-3.0-or-later,
+  same author. Changes to its UI happen there, get built, and the resulting
   `dist/` is what ships in this skill's own `dist/` folder.
 - **The staging directory is disposable.** It's regenerated (app shell re-copied,
   backlog re-symlinked) on every invocation of this skill — nothing of value
