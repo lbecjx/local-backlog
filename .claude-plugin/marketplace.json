@@ -1,6 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "local-backlog",
+  "description": "A Claude Code plugin for local issue/story tracking without a cloud-based tracker.",
   "owner": {
     "name": "Luis Becjx"
   },
