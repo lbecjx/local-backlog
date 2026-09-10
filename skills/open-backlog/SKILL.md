@@ -5,7 +5,7 @@ description: Serves the bundled backlog viewer app against the project's backlog
 
 <!--
 local-backlog — a local issue/story tracker for Claude Code, no cloud account needed
-Copyright (C) 2026  Luis Becjx
+Copyright (C) 2026  Luis Becerra
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by

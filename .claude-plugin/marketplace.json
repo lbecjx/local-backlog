@@ -3,7 +3,7 @@
   "name": "local-backlog",
   "description": "A Claude Code plugin for local issue/story tracking without a cloud-based tracker.",
   "owner": {
-    "name": "Luis Becjx"
+    "name": "Luis Becerra"
   },
   "plugins": [
     {
