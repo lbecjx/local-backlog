@@ -1,0 +1,54 @@
+# local-backlog
+
+For [Claude Code](https://code.claude.com) projects without access to a cloud-based issue tracker: create and manage stories as plain Markdown files, with auto-incrementing ticket codes and a searchable local viewer.
+
+"Local" means no external service dependency — not necessarily private. Files can be gitignored or committed with the rest of the repo, by choice.
+
+## Skills
+
+| Skill | What it does |
+|---|---|
+| `/local-backlog:create-story` | Creates a story in `backlog/` with an auto-incrementing `<PREFIX>-XXXX` code, in structured ticket shape |
+| `/local-backlog:open-backlog` | Serves the bundled viewer against `backlog/` and opens it in your browser |
+| `/local-backlog:help` | Shows the backlog's current state and available skills |
+
+## The viewer
+
+A small pre-built React app, shipped ready to run — no `node`/`pnpm` needed to use it, only Python 3 to serve it locally (`python3 -m http.server` under the hood). It discovers stories live from `backlog/`: no manifest, no regeneration step. Edit a story and refresh the browser — the change is there.
+
+## Installation
+
+```
+/plugin marketplace add /path/to/local-backlog
+/plugin install local-backlog@local-backlog
+```
+
+(Replace the path with wherever you've cloned this repo, or its GitHub URL once published.)
+
+## Independence from `workflow-dev`
+
+This plugin has no dependency on the separate [`workflow-dev`](https://github.com/lbecjx/workflow-dev) plugin, and no awareness of it — `local-backlog` only creates and displays stories, it has no opinion on how you implement them. Once a story is created, `/workflow-dev:init backlog/<PREFIX>-XXXX-....md` works exactly like passing an external tracker's issue ID — the `.md` file *is* the story — but that's a feature of `workflow-dev` accepting any local Markdown file, not a coupling between the two plugins. Install either one on its own, or both; neither requires the other.
+
+## License
+
+Licensed under the GNU General Public License v3.0 or later — see [LICENSE](./LICENSE) for the full text.
+
+```
+local-backlog — a local issue/story tracker for Claude Code, no cloud account needed
+Copyright (C) 2026  Luis Becjx
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+```
+
+Author: Luis Becjx ([@lbecjx](https://github.com/lbecjx))
