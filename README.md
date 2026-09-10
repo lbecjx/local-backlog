@@ -25,9 +25,11 @@ A small pre-built React app, shipped ready to run — no `node`/`pnpm` needed to
 
 (Replace the path with wherever you've cloned this repo, or its GitHub URL once published.)
 
-## Independence from `workflow-dev`
+## Recommended alongside this plugin
 
-This plugin has no dependency on the separate [`workflow-dev`](https://github.com/lbecjx/workflow-dev) plugin, and no awareness of it — `local-backlog` only creates and displays stories, it has no opinion on how you implement them. Once a story is created, `/workflow-dev:init backlog/<PREFIX>-XXXX-....md` works exactly like passing an external tracker's issue ID — the `.md` file *is* the story — but that's a feature of `workflow-dev` accepting any local Markdown file, not a coupling between the two plugins. Install either one on its own, or both; neither requires the other.
+Once a story is created here, we suggest using [`workflow-dev`](https://github.com/lbecjx/workflow-dev) to actually work on it — `/workflow-dev:init backlog/<PREFIX>-XXXX-....md` works exactly like passing an external tracker's issue ID, and the rest of that plugin's flow (plan, implement, validate) picks up from there.
+
+They're independent plugins, though — `local-backlog` has no awareness of `workflow-dev` and only creates/displays stories, with no opinion on how you implement them. Install either one on its own, or both; neither depends on the other.
 
 ## License
 
