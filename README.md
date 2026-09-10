@@ -16,6 +16,8 @@ For [Claude Code](https://code.claude.com) projects without access to a cloud-ba
 
 A small pre-built React app, shipped ready to run — no `node`/`pnpm` needed to use it, only Python 3 to serve it locally (`python3 -m http.server` under the hood). It discovers stories live from `backlog/`: no manifest, no regeneration step. Edit a story and refresh the browser — the change is there.
 
+Its source is a separate, independently versioned project: [`lbecjx/backlog-viewer`](https://github.com/lbecjx/backlog-viewer) (GPL-3.0-or-later, same author). This plugin only ships its pre-built output (`skills/open-backlog/dist/`); the app itself is never hand-edited from here.
+
 ## Installation
 
 ```
