@@ -21,11 +21,9 @@ Its source is a separate, independently versioned project: [`lbecjx/backlog-view
 ## Installation
 
 ```
-/plugin marketplace add /path/to/local-backlog
-/plugin install local-backlog@local-backlog
+/plugin marketplace add lbecjx/claude-plugins
+/plugin install local-backlog@lbecjx
 ```
-
-(Replace the path with wherever you've cloned this repo, or its GitHub URL once published.)
 
 ## Recommended alongside this plugin
 
