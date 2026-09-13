@@ -10,6 +10,7 @@ For [Claude Code](https://code.claude.com) projects without access to a cloud-ba
 |---|---|
 | `/local-backlog:create-story` | Creates a story in `backlog/` with an auto-incrementing `<PREFIX>-XXXX` code, in structured ticket shape |
 | `/local-backlog:open-backlog` | Serves the bundled viewer against `backlog/` and opens it in your browser |
+| `/local-backlog:fix` | Diagnoses and fixes a broken or misbehaving backlog/viewer — missing stories, wrong statuses, malformed metadata |
 | `/local-backlog:help` | Shows the backlog's current state and available skills |
 
 ## The viewer

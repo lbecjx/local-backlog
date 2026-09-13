@@ -37,6 +37,7 @@ Backlog: backlog/ (N stories)
 Available skills:
   /local-backlog:create-story — Create a story with an auto-incrementing code
   /local-backlog:open-backlog — Serve the viewer and open it in the browser
+  /local-backlog:fix          — Diagnose and fix a broken/misbehaving backlog or viewer
   /local-backlog:help         — This screen
 ```
 
@@ -57,6 +58,7 @@ works exactly like passing an external tracker's issue ID — the `.md` file *is
 |-----------|-------|
 | Capturing a new story (with or without an external tracker) | `/local-backlog:create-story` |
 | Browsing or searching the backlog visually | `/local-backlog:open-backlog` |
+| Something looks broken (no stories, wrong statuses, odd behavior) | `/local-backlog:fix` |
 | Not sure what's next | `/local-backlog:help` |
 
 ## When NOT to use this plugin
