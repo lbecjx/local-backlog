@@ -36,90 +36,35 @@ reason this skill needs `python3` on the machine.
 
 ## Execution
 
-### Step 1: Locate the backlog
-
-1. Repo root: `git rev-parse --show-toplevel` (fall back to cwd if not a git repo)
-2. Look for `backlog/` at the root
-3. **If it does not exist** → tell the human there is no backlog yet and suggest
-   `/local-backlog:create-story` to create the first story. Do NOT create an
-   empty folder just to open an empty viewer, and do NOT proceed to the steps below.
-
-### Step 2: Check for python3
+Run the bundled script with a single, fixed command:
 
 ```bash
-command -v python3
+bash "<skill-base-dir>/scripts/open-backlog.sh"
 ```
 
-**Not found** → stop and tell the human: "This viewer needs Python 3 to serve
-the app locally (it isn't a single static file like the old generator — it
-discovers stories live over HTTP). Install it from python.org or your system's
-package manager, then try again." Do not fall back to `python` (Python 2) or
-attempt to install anything yourself.
+Always invoke it exactly like that — same literal command line every time,
+nothing inlined or interpolated into it. That's deliberate: a fixed command
+string is what lets Claude Code's permission system recognize "this is the
+same command as before" across runs, instead of re-prompting on every
+invocation the way an inline script (whose text is rebuilt fresh each time)
+would. Do not paste the script's contents inline instead of calling the file
+— that's the one thing most likely to regress this if the skill is ever
+"cleaned up" later.
 
-### Step 3: Prepare the serving directory
+The script does all of it in order: finds the repo root and its `backlog/`
+folder, checks for `python3`, stages the pre-built viewer into a per-project
+temp directory with the real `backlog/` symlinked in live, starts (or reuses)
+the local server, and opens it in the default browser. On Windows, it uses a
+directory junction (`mklink /J`, no admin rights needed) instead of a symlink,
+and falls back to `xcopy /E /I` if that fails — that copy won't reflect future
+edits until the skill is re-run, which is worth telling the human if it happens.
 
-The viewer is a pre-built static app at `<skill-base-dir>/dist/` (React + Vite,
-already built — no `pnpm`/`node` needed to run it). It gets served from a
-per-project staging directory outside the repo, not from inside the plugin
-install or the repo itself, so multiple projects using this skill never
-collide and the repo never gets a stray runtime folder.
+Read the script's own output to know what happened, then report to the human:
 
-1. Compute a stable staging directory from the repo root path, e.g.:
-   ```bash
-   HASH=$(printf '%s' "<repo-root>" | shasum | cut -c1-12)   # or sha1sum on Linux
-   STAGE="${TMPDIR:-/tmp}/local-backlog-viewer/$HASH"
-   ```
-2. `mkdir -p "$STAGE"`, then copy the app shell in fresh every run (cheap — a
-   few hundred KB): `cp -R "<skill-base-dir>/dist/." "$STAGE/"`. Always
-   re-copy, even if `$STAGE` already existed — keeps the served app in sync if
-   the plugin itself was updated since the last run.
-3. Wire in the real backlog, live:
-   - **macOS/Linux:** `ln -sfn "<repo-root>/backlog" "$STAGE/backlog"` (symlink,
-     not a copy — story edits are picked up on the next browser refresh with
-     zero extra steps, matching the no-regeneration design of the viewer itself)
-   - **Windows:** `mklink /J "%STAGE%\backlog" "<repo-root>\backlog"` (directory
-     junction — doesn't require admin rights, unlike a symlink). If junction
-     creation fails for some reason, fall back to `xcopy /E /I` and tell the
-     human this copy won't reflect future edits until the skill is re-run.
-
-### Step 4: Start (or reuse) the server
-
-A symlinked backlog means a previously-started server for this project is
-already live — there's no need to restart it just because a story changed.
-
-1. Check `$STAGE/.viewer.pid` for a previous run: does it contain a PID that's
-   still alive, and did that process bind the recorded port? If yes, skip
-   straight to Step 5 with that port — nothing else to do.
-2. Otherwise, pick a port: start at `8420`, increment until one isn't already
-   bound (`lsof -i :$PORT` or equivalent). Cap the search (e.g. 20 attempts) —
-   if nothing free turns up, tell the human instead of looping forever.
-3. Start the server detached from this session so it outlives the skill
-   invocation: `python3 -m http.server "$PORT" --directory "$STAGE" >/dev/null 2>&1 &`
-   then `disown` it (or the platform equivalent) so it isn't tied to this shell.
-4. Write `$STAGE/.viewer.pid` with the PID and port (e.g. `<pid>:<port>`), so
-   the next invocation can find and reuse it per Step 4.1.
-
-### Step 5: Open it
-
-| Platform | Command |
-|---|---|
-| macOS | `open "http://localhost:$PORT/"` |
-| Linux | `xdg-open "http://localhost:$PORT/"` |
-| Windows | `start "" "http://localhost:%PORT%/"` |
-
-Use the default browser (`open`), not a hardcoded browser name.
-
-If the human explicitly asks for a specific browser, target it:
-`open -a "Google Chrome" "http://localhost:$PORT/"` on macOS.
-
-### Step 6: Confirm
-
-Tell the human:
-- How many stories are in `backlog/` (a quick count of `<PREFIX>-*.md` is enough — the viewer itself will show the exact number once loaded)
-- The URL that was opened
-- That it's a live server: editing a story and refreshing the page is enough, no need to re-run this skill — only re-run it if the server ever needs restarting (e.g. after a machine reboot)
-
-Keep it to two or three lines — the browser window is the real output.
+- **`NO_BACKLOG`** → there is no backlog yet; suggest `/local-backlog:create-story`. Do NOT create an empty folder just to open an empty viewer.
+- **`NO_PYTHON3`** → "This viewer needs Python 3 to serve the app locally (it discovers stories live over HTTP, unlike a single static file). Install it from python.org or your system's package manager, then try again." Do not attempt to install anything yourself.
+- **`NO_FREE_PORT`** → tell the human no port was free after 20 attempts, don't loop forever.
+- **`OPENED:<port>` / `STORIES:<n>`** → tell the human how many stories are in `backlog/`, the URL that was opened, and that it's a live server — editing a story and refreshing the page is enough, no need to re-run this skill (only re-run it if the server needs restarting, e.g. after a reboot). Keep it to two or three lines — the browser window is the real output.
 
 ## What the viewer does
 
@@ -128,9 +73,9 @@ Keep it to two or three lines — the browser window is the real output.
 - **Status chips:** click to filter by status; click again to clear
 - **Right panel:** the selected story rendered from its markdown, including syntax-highlighted code blocks
 
-Story discovery happens client-side via the directory listing `python3 -m
-http.server` generates for `$STAGE/backlog/` — there's no manifest file and
-nothing to regenerate when stories change.
+Story discovery happens client-side via the directory listing the local
+server generates for `$STAGE/backlog/` — there's no manifest file and nothing
+to regenerate when stories change.
 
 ## Notes
 
@@ -142,6 +87,11 @@ nothing to regenerate when stories change.
 - **The staging directory is disposable.** It's regenerated (app shell re-copied,
   backlog re-symlinked) on every invocation of this skill — nothing of value
   lives there that isn't also in `<repo-root>/backlog/` or the plugin's `dist/`.
+- **The server (`scripts/idle_server.py`) shuts itself down after 30 minutes
+  with no requests**, so a forgotten viewer doesn't sit consuming RAM
+  indefinitely. This needs no cleanup step: the next `open-backlog` run
+  already checks whether the recorded PID is still alive before reusing it,
+  so a self-terminated server is transparently treated as "start a fresh one."
 - **One server per project, reused across invocations** — re-running this skill
   after already having it open just re-opens the same URL rather than spawning
   a second server on a new port.

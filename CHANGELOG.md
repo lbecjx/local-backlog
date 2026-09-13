@@ -14,6 +14,25 @@ All notable changes to this plugin are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/), versioning follows
 [Semantic Versioning](https://semver.org/).
 
+## 1.1.0
+
+- Added `/local-backlog:fix` — diagnoses and fixes a broken or misbehaving
+  backlog/viewer (no stories showing, wrong/unknown statuses, malformed
+  metadata tables), asking for confirmation before any change and for input
+  when a fix is ambiguous. Motivated by a real case: a project with stories
+  still on the legacy metadata-key format silently showed every story as
+  "Unknown" once that fallback was removed in 1.0.1.
+- `/local-backlog:open-backlog` now runs a bundled script file
+  (`scripts/open-backlog.sh`) instead of an inline shell block — one
+  permission prompt for the whole flow instead of several, and a fixed
+  command line stable enough for Claude Code's permission system to remember
+  across runs instead of re-prompting every single time.
+- The local server it starts (`scripts/idle_server.py`) now shuts itself down
+  after 30 minutes with no requests, instead of running forever until the
+  machine reboots — a forgotten viewer no longer sits consuming RAM
+  indefinitely. Picked up transparently: the next run already checks whether
+  the previous server's PID is still alive before reusing it.
+
 ## 1.0.1
 
 - Fixed the bundled viewer (`skills/open-backlog/dist/`) to parse story metadata
