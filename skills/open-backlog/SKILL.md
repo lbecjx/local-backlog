@@ -36,72 +36,28 @@ reason this skill needs `python3` on the machine.
 
 ## Execution
 
-Run this as **one shell script, in a single Bash call** — not one command per
-step. Splitting it into several separate invocations makes the human approve
-a permission prompt for each one; chained into one script, it's a single
-approval for the whole flow. This is worth preserving deliberately: it's the
-one thing most likely to regress if this skill is ever "cleaned up" into
-separate steps again.
+Run the bundled script with a single, fixed command:
 
 ```bash
-set -e
-
-# Step 1: locate the backlog
-REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-if [ ! -d "$REPO_ROOT/backlog" ]; then
-  echo "NO_BACKLOG"
-  exit 0
-fi
-
-# Step 2: check for python3 (never fall back to python2, never auto-install)
-if ! command -v python3 >/dev/null 2>&1; then
-  echo "NO_PYTHON3"
-  exit 0
-fi
-
-# Step 3: prepare the serving directory — a per-project staging dir outside
-# the repo, so multiple projects never collide and the repo never gets a
-# stray runtime folder. <skill-base-dir> is this skill's own directory.
-HASH=$(printf '%s' "$REPO_ROOT" | shasum | cut -c1-12)   # sha1sum on Linux
-STAGE="${TMPDIR:-/tmp}/local-backlog-viewer/$HASH"
-mkdir -p "$STAGE"
-cp -R "<skill-base-dir>/dist/." "$STAGE/"   # re-copy every run, keeps it in sync with the plugin
-ln -sfn "$REPO_ROOT/backlog" "$STAGE/backlog"   # symlink, not a copy — edits show up on refresh
-
-# Step 4: start the server, or reuse one already running for this project
-if [ -f "$STAGE/.viewer.pid" ]; then
-  PID=$(cut -d: -f1 "$STAGE/.viewer.pid")
-  PORT=$(cut -d: -f2 "$STAGE/.viewer.pid")
-  if ! kill -0 "$PID" 2>/dev/null; then
-    PORT=""   # stale pid file, fall through to starting a new one
-  fi
-fi
-if [ -z "$PORT" ]; then
-  PORT=8420
-  TRIES=0
-  while lsof -i :"$PORT" >/dev/null 2>&1; do
-    PORT=$((PORT + 1))
-    TRIES=$((TRIES + 1))
-    if [ "$TRIES" -ge 20 ]; then
-      echo "NO_FREE_PORT"
-      exit 0
-    fi
-  done
-  nohup python3 -m http.server "$PORT" --directory "$STAGE" >/dev/null 2>&1 &
-  echo "$!:$PORT" > "$STAGE/.viewer.pid"
-fi
-
-# Step 5: open it — default browser, never a hardcoded one, unless the human asked for one
-open "http://localhost:$PORT/" 2>/dev/null || xdg-open "http://localhost:$PORT/" 2>/dev/null
-
-echo "OPENED:$PORT"
-echo "STORIES:$(ls "$REPO_ROOT"/backlog/*.md 2>/dev/null | wc -l | tr -d ' ')"
+bash "<skill-base-dir>/scripts/open-backlog.sh"
 ```
 
-On Windows, `mklink /J` (directory junction, no admin rights needed) instead
-of `ln -sfn`, and `start ""` instead of `open`/`xdg-open`. If junction
-creation fails, fall back to `xcopy /E /I` and tell the human that copy won't
-reflect future edits until the skill is re-run.
+Always invoke it exactly like that — same literal command line every time,
+nothing inlined or interpolated into it. That's deliberate: a fixed command
+string is what lets Claude Code's permission system recognize "this is the
+same command as before" across runs, instead of re-prompting on every
+invocation the way an inline script (whose text is rebuilt fresh each time)
+would. Do not paste the script's contents inline instead of calling the file
+— that's the one thing most likely to regress this if the skill is ever
+"cleaned up" later.
+
+The script does all of it in order: finds the repo root and its `backlog/`
+folder, checks for `python3`, stages the pre-built viewer into a per-project
+temp directory with the real `backlog/` symlinked in live, starts (or reuses)
+the local server, and opens it in the default browser. On Windows, it uses a
+directory junction (`mklink /J`, no admin rights needed) instead of a symlink,
+and falls back to `xcopy /E /I` if that fails — that copy won't reflect future
+edits until the skill is re-run, which is worth telling the human if it happens.
 
 Read the script's own output to know what happened, then report to the human:
 
