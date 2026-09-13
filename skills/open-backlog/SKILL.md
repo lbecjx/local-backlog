@@ -73,9 +73,9 @@ Read the script's own output to know what happened, then report to the human:
 - **Status chips:** click to filter by status; click again to clear
 - **Right panel:** the selected story rendered from its markdown, including syntax-highlighted code blocks
 
-Story discovery happens client-side via the directory listing `python3 -m
-http.server` generates for `$STAGE/backlog/` — there's no manifest file and
-nothing to regenerate when stories change.
+Story discovery happens client-side via the directory listing the local
+server generates for `$STAGE/backlog/` — there's no manifest file and nothing
+to regenerate when stories change.
 
 ## Notes
 
@@ -87,6 +87,11 @@ nothing to regenerate when stories change.
 - **The staging directory is disposable.** It's regenerated (app shell re-copied,
   backlog re-symlinked) on every invocation of this skill — nothing of value
   lives there that isn't also in `<repo-root>/backlog/` or the plugin's `dist/`.
+- **The server (`scripts/idle_server.py`) shuts itself down after 30 minutes
+  with no requests**, so a forgotten viewer doesn't sit consuming RAM
+  indefinitely. This needs no cleanup step: the next `open-backlog` run
+  already checks whether the recorded PID is still alive before reusing it,
+  so a self-terminated server is transparently treated as "start a fresh one."
 - **One server per project, reused across invocations** — re-running this skill
   after already having it open just re-opens the same URL rather than spawning
   a second server on a new port.

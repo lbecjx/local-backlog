@@ -15,7 +15,8 @@
 
 set -e
 
-DIST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/dist"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DIST_DIR="$(cd "$SCRIPT_DIR/.." && pwd)/dist"
 
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 if [ ! -d "$REPO_ROOT/backlog" ]; then
@@ -53,7 +54,7 @@ if [ -z "$PORT" ]; then
       exit 0
     fi
   done
-  nohup python3 -m http.server "$PORT" --directory "$STAGE" >/dev/null 2>&1 &
+  nohup python3 "$SCRIPT_DIR/idle_server.py" "$PORT" "$STAGE" >/dev/null 2>&1 &
   echo "$!:$PORT" > "$STAGE/.viewer.pid"
 fi
 

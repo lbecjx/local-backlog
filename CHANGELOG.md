@@ -27,6 +27,11 @@ All notable changes to this plugin are documented here. Format loosely follows
   permission prompt for the whole flow instead of several, and a fixed
   command line stable enough for Claude Code's permission system to remember
   across runs instead of re-prompting every single time.
+- The local server it starts (`scripts/idle_server.py`) now shuts itself down
+  after 30 minutes with no requests, instead of running forever until the
+  machine reboots — a forgotten viewer no longer sits consuming RAM
+  indefinitely. Picked up transparently: the next run already checks whether
+  the previous server's PID is still alive before reusing it.
 
 ## 1.0.1
 
