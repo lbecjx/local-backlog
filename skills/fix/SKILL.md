@@ -82,6 +82,10 @@ Don't start guessing before you know what "broken" means here.
   what you're about to change — the diff or a clear before/after — and get
   confirmation before applying. Never bulk-edit every story file silently,
   even when the fix is mechanical and applies to all of them the same way.
+  If the fix changes a story's `Status` value (not just renames the field
+  key), use `/local-backlog:update-status`'s script instead of editing the
+  `Status` row directly — it keeps `Updated` and `## History` in sync in the
+  same pass, which a manual edit here would otherwise skip.
 - **Ambiguous** (a status value that isn't a known state and isn't clearly a
   deliberate custom one either, a field that doesn't map cleanly to the
   current schema, anything you'd have to guess at) → ask the human what they

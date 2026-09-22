@@ -35,6 +35,15 @@ mkdir -p "$STAGE"
 cp -R "$DIST_DIR/." "$STAGE/"
 ln -sfn "$REPO_ROOT/backlog" "$STAGE/backlog"
 
+# The authoritative status/color palette — the same file
+# update-status.sh and its SKILL.md reference by path — served at the app's
+# own root (not inside backlog/, which is per-project data) so the viewer's
+# runtime fetch('/status-colors.json') resolves to this exact file. Copied
+# after dist/, deliberately overwriting any placeholder that ships inside
+# backlog-viewer's own build output (used only for that project's isolated
+# dev/test runs, never meant to reach a real project through this script).
+cp "$SCRIPT_DIR/../../update-status/references/status-colors.json" "$STAGE/status-colors.json"
+
 PORT=""
 if [ -f "$STAGE/.viewer.pid" ]; then
   PID=$(cut -d: -f1 "$STAGE/.viewer.pid")

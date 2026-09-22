@@ -51,17 +51,51 @@ code counter is persisted alongside it** in `backlog/.backlog-config.json`:
 { "prefix": "NB", "lastCode": 3 }
 ```
 
-It's created exactly once, the first time `backlog/` doesn't exist yet:
+The project's known `Status` values and the color each renders as in
+`/local-backlog:open-backlog`'s viewer live in a **separate** file,
+`backlog/.backlog-statuses.json` — ticket numbering and `Status` typing are
+unrelated concerns that happen to both be per-project config, so they don't
+share a file:
+
+```json
+{
+  "statuses": [
+    { "name": "Not Started", "color": "neutral" },
+    { "name": "In Progress", "color": "blue" },
+    { "name": "Done", "color": "green" }
+  ]
+}
+```
+
+`color` must be one of the names defined in
+`skills/update-status/references/status-colors.json` — that file is
+authoritative, not this doc; read it rather than guessing or reusing a name
+from memory, since it can gain or lose entries independently of this text.
+The `statuses` list is what makes `Status` a closed set rather than free text:
+`/local-backlog:update-status` rejects any value not in it, and the viewer
+gives an unrecognized value a distinct "needs attention" color instead of
+silently treating it as one of the known ones.
+
+Both files are created exactly once, the first time `backlog/` doesn't exist yet:
 
 1. Suggest a prefix derived from the repo/folder name (e.g. `notebooks` → `NB`,
    `payments-api` → `PAY`) and let the human confirm or change it
-2. Create the file with that prefix and `lastCode: 0`
-3. From then on, always read the prefix and counter from there — never ask for the prefix again, never recompute the counter by scanning files
+2. Create `.backlog-config.json` with that prefix and `lastCode: 0`, and
+   `.backlog-statuses.json` with the 3 default `statuses` shown above — a human
+   can add more later (see `/local-backlog:update-status`'s own docs for how),
+   but don't ask about this up front; the defaults cover the overwhelming
+   majority of stories
+3. From then on, always read the prefix and counter from `.backlog-config.json`
+   and the statuses from `.backlog-statuses.json` — never ask for the prefix
+   again, never recompute the counter by scanning files
 
-If the folder already exists but the config doesn't (backlogs created before this
-mechanism existed): infer the prefix from the pattern of existing filenames
-(`^([A-Z]+)-\d{4}-`), infer `lastCode` as the highest number found, and
-write the config so this inference never has to run again.
+If the folder already exists but `.backlog-config.json` doesn't (backlogs
+created before this mechanism existed): infer the prefix from the pattern of
+existing filenames (`^([A-Z]+)-\d{4}-`), infer `lastCode` as the highest number
+found, and write the config so this inference never has to run again. If
+`.backlog-statuses.json` doesn't exist yet either (even on an otherwise-current
+backlog, since it was introduced later than `.backlog-config.json`): create it
+with the same 3 defaults.
 
 ### Step 2: Compute the next code
 
@@ -148,7 +182,7 @@ for when parsing a `.md` as a story (see `skills/init/references/workflow.md`, S
 
 ## What this skill does NOT do
 
-- **Doesn't update the status** of existing stories — that's manual, or handled by another skill
+- **Doesn't update the status** of existing stories — use `/local-backlog:update-status`
 - **Doesn't prioritize the backlog** — doesn't reorder or suggest what to do first
 - **Doesn't implement anything** — it only captures the story
 - **Doesn't delete or renumber** existing stories

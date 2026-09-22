@@ -59,15 +59,28 @@ This check runs once per invocation, not per story in a batch request.
 3. **If it doesn't exist — this is first use for this project:**
    a. Ask the human what prefix to use for story codes: 2-5 uppercase letters, project-specific (e.g. a repo called `notebooks` → `NB`, `payments-api` → `PAY`). Suggest one derived from the repo/folder name as a default, but let the human override it.
    b. Create `backlog/`
-   c. Write `backlog/.backlog-config.json` with the prefix AND the counter, starting at 0:
+   c. Write `backlog/.backlog-config.json` with the prefix and the counter starting at 0:
       ```json
       { "prefix": "NB", "lastCode": 0 }
       ```
       (using whatever prefix was chosen — `NB` here is just the example)
+   c2. Write `backlog/.backlog-statuses.json` with the 3 default statuses —
+       a separate file, deliberately: ticket numbering (`.backlog-config.json`)
+       and `Status` typing are unrelated concerns that happen to both be
+       per-project config:
+      ```json
+      {
+        "statuses": [
+          { "name": "Not Started", "color": "neutral" },
+          { "name": "In Progress", "color": "blue" },
+          { "name": "Done", "color": "green" }
+        ]
+      }
+      ```
    d. Tell the human the folder and the prefix were set up
-4. **If it already exists** → read `backlog/.backlog-config.json` for both `prefix` and `lastCode`. If the file is missing or `lastCode` isn't in it (backlog created before this mechanism existed): infer the prefix from existing filenames (`^([A-Z]+)-\d{4}-`) if not already known, infer `lastCode` as the highest number found across existing `<PREFIX>-*.md` filenames (0 if none), and write both into the config immediately so this inference never has to run again. If there are no stories AND no config, fall back to Step 3a.
+4. **If it already exists** → read `backlog/.backlog-config.json` for `prefix` and `lastCode`, and `backlog/.backlog-statuses.json` for `statuses`. If `.backlog-config.json` is missing or incomplete (backlog created before this mechanism existed): infer the prefix from existing filenames (`^([A-Z]+)-\d{4}-`) if not already known, infer `lastCode` as the highest number found across existing `<PREFIX>-*.md` filenames (0 if none), and write it immediately so this inference never has to run again. If `.backlog-statuses.json` is missing (backlog created before *that* mechanism existed, even if `.backlog-config.json` is already current): create it with the same 3 defaults shown above. If there are no stories AND no config, fall back to Step 3a.
 5. **Never** create `backlog/` inside a subdirectory of the repo — it always lives at the root
-6. **`backlog/` is visible and version-controlled** — it is project documentation, not agent working memory, and that includes `.backlog-config.json`. Do NOT add either to `.gitignore` and do NOT create it as a hidden `.backlog/`. (Contrast with `.workflow-dev/context/`, which IS hidden and gitignored because it's regenerable agent state.)
+6. **`backlog/` is visible and version-controlled** — it is project documentation, not agent working memory, and that includes both `.backlog-config.json` and `.backlog-statuses.json`. Do NOT add any of them to `.gitignore` and do NOT create `backlog/` as a hidden `.backlog/`. (Contrast with `.workflow-dev/context/`, which IS hidden and gitignored because it's regenerable agent state.)
 7. **The prefix is fixed for the life of the project** — once `.backlog-config.json` exists, never ask again and never change it without the human explicitly requesting a rename (which would require renaming every existing story file too — treat that as its own deliberate task, not something to do in passing).
 
 ### Phase 2: Determine the next code
@@ -135,4 +148,4 @@ If the human asks for multiple stories in one go (e.g. "create the 3 pending one
 - **Extract, don't interrogate** — mine the conversation for content before asking
 - **Acceptance Criteria are the contract** — vague ACs make a useless story; push for verifiable ones
 - **Codes are permanent** — never renumber existing stories, never reuse a code
-- **The backlog is not a status tracker** — this skill creates stories; updating status as work progresses is manual or handled by other skills
+- **The backlog is not a status tracker** — this skill creates stories; updating status as work progresses is `/local-backlog:update-status`'s job
