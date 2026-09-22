@@ -35,10 +35,11 @@ Local Backlog — Status
 Backlog: backlog/ (N stories)
 
 Available skills:
-  /local-backlog:create-story — Create a story with an auto-incrementing code
-  /local-backlog:open-backlog — Serve the viewer and open it in the browser
-  /local-backlog:fix          — Diagnose and fix a broken/misbehaving backlog or viewer
-  /local-backlog:help         — This screen
+  /local-backlog:create-story  — Create a story with an auto-incrementing code
+  /local-backlog:update-status — Change a story's Status, syncing Updated + History
+  /local-backlog:open-backlog  — Serve the viewer and open it in the browser
+  /local-backlog:fix           — Diagnose and fix a broken/misbehaving backlog or viewer
+  /local-backlog:help          — This screen
 ```
 
 ## Relationship to workflow-dev
@@ -57,6 +58,7 @@ works exactly like passing an external tracker's issue ID — the `.md` file *is
 | Situation | Skill |
 |-----------|-------|
 | Capturing a new story (with or without an external tracker) | `/local-backlog:create-story` |
+| Starting work, finishing work, or otherwise changing a story's Status | `/local-backlog:update-status` |
 | Browsing or searching the backlog visually | `/local-backlog:open-backlog` |
 | Something looks broken (no stories, wrong statuses, odd behavior) | `/local-backlog:fix` |
 | Not sure what's next | `/local-backlog:help` |

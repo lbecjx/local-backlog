@@ -65,6 +65,10 @@ from a concrete finding, include the finding — not just the conclusion.]
 - [ ] Tests added or updated if behavior changed
 - [ ] Committed following Conventional Commits
 
+## History
+
+- YYYY-MM-DDTHH:MM:SSZ — Created (Status: Not Started)
+
 ---
 
 > Generated with `/local-backlog:create-story`. To work on it: `/workflow-dev:init backlog/<PREFIX>-XXXX-....md`
@@ -81,9 +85,11 @@ from a concrete finding, include the finding — not just the conclusion.]
 | Acceptance Criteria | Yes | Without verifiable ACs the story is useless |
 | Technical Notes | Yes | Can say "none" if there genuinely are none |
 | Definition of Done | Yes | Adjust the items to the type of work (e.g. drop "visual verification" if it doesn't touch UI) |
+| History | Yes | Starts with a single "Created" entry — see Content rules below for how it grows |
 
 ## Content rules
 
-- **The story's `Status` lives here, nowhere else.** It's updated by hand as work progresses.
+- **The story's `Status` lives here, nowhere else.** Use `/local-backlog:update-status` to change it — never edit the `Status` row by hand.
+- **Every `Status` change gets a line in `## History`, appended — never edited or removed.** Format: `- YYYY-MM-DDTHH:MM:SSZ — Status: <old> → <new>` — full ISO 8601 datetime in UTC (`Z` suffix), not just a date, from a real clock (`date -u +%Y-%m-%dT%H:%M:%SZ`), never hand-written or estimated. Storing it in UTC is deliberate: the raw value stays unambiguous no matter who or what writes it. Converting to local time, relative phrasing ("3 days ago"), or any other display format is `/local-backlog:open-backlog`'s viewer's job, not something baked into the stored value. `/local-backlog:update-status`'s script does all of this — including keeping the `Updated` field in sync — in one pass; this rule exists for the rare case something other than that skill needs to touch `Status` directly. Without it, a story's real history — when it actually started, when it stalled, when it shipped — only exists in scattered git commit dates, if the file was even committed incrementally.
 - **The ACs are the contract.** If they say "retry 3 times with exponential backoff 1s/4s/16s," keep ALL of that detail — don't summarize it to "add retries."
 - **Never invent content to fill a section.** What isn't known gets marked ⬜ and asked about.

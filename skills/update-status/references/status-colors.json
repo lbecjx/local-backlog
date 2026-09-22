@@ -1,0 +1,34 @@
+{
+  "neutral": {
+    "badge": "bg-neutral-100 text-neutral-600 dark:bg-neutral-500/15 dark:text-neutral-300",
+    "border": "border-l-neutral-400 dark:border-l-neutral-500"
+  },
+  "blue": {
+    "badge": "bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300",
+    "border": "border-l-blue-500"
+  },
+  "green": {
+    "badge": "bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-300",
+    "border": "border-l-green-500"
+  },
+  "amber": {
+    "badge": "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300",
+    "border": "border-l-amber-500"
+  },
+  "red": {
+    "badge": "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300",
+    "border": "border-l-red-500"
+  },
+  "purple": {
+    "badge": "bg-purple-100 text-purple-700 dark:bg-purple-500/15 dark:text-purple-300",
+    "border": "border-l-purple-500"
+  },
+  "teal": {
+    "badge": "bg-teal-100 text-teal-700 dark:bg-teal-500/15 dark:text-teal-300",
+    "border": "border-l-teal-500"
+  },
+  "indigo": {
+    "badge": "bg-indigo-100 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300",
+    "border": "border-l-indigo-500"
+  }
+}

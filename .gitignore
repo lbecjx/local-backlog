@@ -14,3 +14,6 @@ __pycache__/
 
 # Personal/local Claude Code settings — never meant to be shared
 .claude/settings.local.json
+
+# workflow-dev's own persistent context — private, per-machine, regenerable
+.workflow-dev/
