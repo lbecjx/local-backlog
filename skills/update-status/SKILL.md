@@ -38,15 +38,15 @@ one separately.
 
 ### Step 1: Identify the story file
 
-Resolve `<CODE>` to its file under `backlog/` (e.g. `NB-0005` →
-`backlog/NB-0005-*.md`) — glob on the code prefix, since the rest of the
+Resolve `<CODE>` to its file under `local-backlog/` (e.g. `NB-0005` →
+`local-backlog/NB-0005-*.md`) — glob on the code prefix, since the rest of the
 filename is a free-text slug. Ask if more than one file matches or none do.
 
 ### Step 2: Confirm the target status
 
 If the human said something like "mark it as done", map that to the story's
 actual convention. The project's known statuses live in
-`backlog/.backlog-config.json`'s `statuses` array — `"Not Started"`,
+`local-backlog/.backlog-config.json`'s `statuses` array — `"Not Started"`,
 `"In Progress"`, `"Done"` are the 3 defaults every project starts with, but a
 given project may have added more (e.g. `"Blocked"`). Prefer whatever's
 already listed there over inventing new wording. Show what's about to
@@ -78,12 +78,12 @@ requested status matches the current one), relay that as-is — don't treat it
 as a failure.
 
 **If the script exits non-zero because the requested status isn't in the
-project's `.backlog-config.json`** (it prints the actual list of known
+project's `.backlog-statuses.json`** (it prints the actual list of known
 statuses when this happens): don't silently pick the closest known one, and
 don't retry with a different value on your own. Show the human the list the
 script printed and ask which they meant — a genuine typo, or a real new
 status this project should adopt. For a genuine new status, add an entry to
-`.backlog-config.json`'s `statuses` array yourself, then re-run the script —
+`.backlog-statuses.json`'s `statuses` array yourself, then re-run the script —
 don't ask the human to hand-edit JSON. `color` must be one of the names
 defined in `references/status-colors.json` (in this same skill folder) —
 read that file rather than guessing or reusing a name from memory; it's the
