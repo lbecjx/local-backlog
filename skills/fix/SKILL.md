@@ -33,7 +33,7 @@ it's safe and unambiguous, and asks before touching anything that isn't.
 ## Scope boundary
 
 This skill lives entirely on the side of the project that **consumes** the
-plugin — its own `backlog/` folder, its own server process, its own story
+plugin — its own `local-backlog/` folder, its own server process, its own story
 files. It never touches or assumes anything about the separate
 `backlog-viewer` development repo — same boundary `open-backlog` already
 respects (see its own "Notes" section). If the viewer's actual *code* is
@@ -52,25 +52,58 @@ Don't start guessing before you know what "broken" means here.
 
 ### Step 2: Run the checklist (cheapest checks first)
 
-1. **Does `backlog/` exist at the repo root?** (`git rev-parse --show-toplevel`,
-   then check for the folder). If not, there's nothing to fix — tell the human
-   and suggest `/local-backlog:create-story`.
-2. **Is the local server actually running and responding?** Check for a
+1. **Does a legacy `backlog/` folder exist instead of `local-backlog/`?** This
+   plugin used `backlog/` as the folder name before renaming it to
+   `local-backlog/` (to avoid colliding with other tools/conventions that
+   might already use a bare `backlog/` for something unrelated). If `backlog/`
+   exists and `local-backlog/` doesn't:
+   a. Tell the human this project is on the legacy folder name and offer to migrate.
+   b. Show exactly what migration does before doing it: `git mv backlog local-backlog`
+      (or a plain `mv` if the folder isn't tracked), then update every story file's
+      own footer line (`> Generated with ... To work on it: /workflow-dev:init
+      backlog/<CODE>-....md`) to say `local-backlog/` instead. Get confirmation first —
+      this touches every story file, even though the edit itself is mechanical and
+      identical each time.
+   c. If `.backlog-config.json` doesn't yet have a `gitignored` field (it predates that
+      mechanism), ask the human the same question `/local-backlog:create-story`'s Phase 1
+      would ask on first use — gitignored or tracked — rather than leaving it unset. See
+      that skill's own docs for the exact tradeoff to explain. If the answer is `true`,
+      remember that `git mv` (step b) already tracked the folder under its new name —
+      adding it to `.gitignore` alone won't untrack those files, so also run
+      `git rm -r --cached local-backlog/` (files stay on disk; this only drops them from
+      git's index).
+   d. Don't create a second, parallel `local-backlog/` next to an untouched `backlog/` —
+      that leaves two backlogs, which is worse than the original problem.
+2. **Does `local-backlog/` exist at the repo root?** (`git rev-parse --show-toplevel`,
+   then check for the folder — after handling the legacy-folder case above). If not, there's
+   nothing to fix — tell the human and suggest `/local-backlog:create-story`.
+3. **Does `.backlog-config.json` still lack a `gitignored` field?** Step 1c already asks
+   this for a project migrating off the legacy `backlog/` name — this item catches
+   everyone else: a project already on `local-backlog/` whose config predates the field
+   (created before this mechanism existed, and never re-triggered by running
+   `/local-backlog:create-story` since). If it's still missing, ask the same question
+   `/local-backlog:create-story`'s Phase 1 asks on first use — gitignored or tracked — and
+   act on the answer the same way Step 1c does: `true` → add `local-backlog/` to
+   `.gitignore` (creating it if missing) and, if the folder is already tracked
+   (`git ls-files local-backlog/ | head -1`), also run `git rm -r --cached local-backlog/`;
+   `false` → do nothing further. Write the answer into `.backlog-config.json` either way,
+   so this is asked only once per project.
+4. **Is the local server actually running and responding?** Check for a
    `.viewer.pid` in the staging directory (see `open-backlog`'s own Step 4 for
    how that's computed) and `curl` the URL. A dead or never-started server
    looks identical to "no stories" in the browser — rule this out first, it's
    the cheapest check.
-3. **Is there a stray `index.html` (or any other file) inside `backlog/` that
+5. **Is there a stray `index.html` (or any other file) inside `local-backlog/` that
    isn't a story?** `python3 -m http.server` serves that instead of the
    directory listing the viewer depends on for discovery — a single stray file
    silently breaks discovery for every story in the folder. This exact bug
    was found and fixed in a real project during this skill's design (a leftover
    `index.html` from a discontinued generator).
-4. **Do the story files use the current metadata schema?** The table must
+6. **Do the story files use the current metadata schema?** The table must
    read `| Field | Value |` with rows `Code / Type / Priority / Status /
    Labels / Created / Updated` (see `create-story/references/template.md` for
    the authoritative current shape). Grep for the table header row across
-   `backlog/*.md` — any file whose table doesn't match (legacy Spanish keys
+   `local-backlog/*.md` — any file whose table doesn't match (legacy Spanish keys
    like `Campo/Valor`, `Estado`, `Código`, or any other drift) is why the
    viewer shows "Unknown" or blank fields for it: the parser reads the
    current English keys only, nothing else.

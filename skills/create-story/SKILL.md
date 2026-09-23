@@ -1,6 +1,6 @@
 ---
 name: create-story
-description: Creates a structured story file in the project's local backlog/ folder, with an auto-incrementing <PREFIX>-XXXX code (prefix chosen per-project on first use). For projects without access to an external issue tracker. Use when the user says "create story", "new story", or "add to backlog".
+description: Creates a structured story file in the project's local-backlog/ folder, with an auto-incrementing <PREFIX>-XXXX code (prefix chosen per-project on first use). For projects without access to an external issue tracker. Use when the user says "create story", "new story", or "add to backlog".
 ---
 
 <!--
@@ -15,7 +15,7 @@ the Free Software Foundation, either version 3 of the License, or
 
 # Create Local Story
 
-Creates a story in `backlog/` with an auto-incrementing code, in a structured ticket format. This is the local-project substitute for an external tracker's ticket — the output is designed to be consumed directly by `/workflow-dev:init`.
+Creates a story in `local-backlog/` with an auto-incrementing code, in a structured ticket format. This is the local-project substitute for an external tracker's ticket — the output is designed to be consumed directly by `/workflow-dev:init`.
 
 ## When to use
 
@@ -43,7 +43,7 @@ Trigger phrases like "create a story" are ambiguous on their own — they don't 
    integration?
 2. **If that tooling is available or the repo context says one is in use** → stop
    and ask the human explicitly: "This project has an external issue tracker available — should the
-   story go there, or stay in the local backlog (`backlog/`)?" Proceed
+   story go there, or stay in the local backlog (`local-backlog/`)?" Proceed
    with this skill only if they confirm local.
 3. **If no such signal is found at all** → proceed directly, no need to ask — local
    is the only option that actually works here.
@@ -52,22 +52,41 @@ Trigger phrases like "create a story" are ambiguous on their own — they don't 
 
 This check runs once per invocation, not per story in a batch request.
 
-### Phase 1: Locate the backlog and its prefix
+### Phase 1: Locate the backlog, its prefix, and its git-tracking preference
 
 1. Find the repo root (`git rev-parse --show-toplevel`; if not a git repo, use the current working directory)
-2. Look for `backlog/` at the root
-3. **If it doesn't exist — this is first use for this project:**
+2. Look for `local-backlog/` at the root. Also check for the legacy `backlog/` name (this
+   plugin used that name before `local-backlog/`) — if found, don't silently treat it as
+   "doesn't exist": that's a migration case, handled by `/local-backlog:fix`. Tell the human
+   a legacy `backlog/` folder was found and suggest running `/local-backlog:fix` to migrate
+   it, rather than creating a second, parallel `local-backlog/` folder.
+3. **If neither exists — this is first use for this project:**
    a. Ask the human what prefix to use for story codes: 2-5 uppercase letters, project-specific (e.g. a repo called `notebooks` → `NB`, `payments-api` → `PAY`). Suggest one derived from the repo/folder name as a default, but let the human override it.
-   b. Create `backlog/`
-   c. Write `backlog/.backlog-config.json` with the prefix and the counter starting at 0:
+   b. Ask the human whether `local-backlog/` should be gitignored or tracked in git. This is
+      a real tradeoff, not a formality: unlike `.workflow-dev/context/` (regenerable agent
+      state — losing it just means re-deriving it later), a backlog's stories are
+      irreplaceable, human-authored content. **Gitignored** means the backlog lives only on
+      this machine, is never backed up by git, and is permanently lost if this folder or
+      machine is ever lost — the right choice for a maintainer's own working notes in a repo
+      meant to be published/distributed to others (a plugin, a public library), where those
+      notes shouldn't ship to end users. **Tracked** means it's versioned with the rest of
+      the repo, survives clones and backups, and is visible to anyone with repo access — the
+      right choice when the backlog is itself legitimate project documentation. Don't default
+      silently to either — ask.
+   c. Create `local-backlog/`
+   d. Write `local-backlog/.backlog-config.json` with the prefix, the counter starting at 0,
+      and the git-tracking choice:
       ```json
-      { "prefix": "NB", "lastCode": 0 }
+      { "prefix": "NB", "lastCode": 0, "gitignored": false }
       ```
-      (using whatever prefix was chosen — `NB` here is just the example)
-   c2. Write `backlog/.backlog-statuses.json` with the 3 default statuses —
-       a separate file, deliberately: ticket numbering (`.backlog-config.json`)
-       and `Status` typing are unrelated concerns that happen to both be
-       per-project config:
+      (using whatever prefix and choice were actually given — this example just shows the shape)
+   e. If `gitignored: true` was chosen, add `local-backlog/` to `.gitignore` now (creating
+      `.gitignore` if the project doesn't have one yet). If `false`, do nothing further —
+      the folder is meant to be tracked normally.
+   f. Write `local-backlog/.backlog-statuses.json` with the 3 default statuses —
+      a separate file, deliberately: ticket numbering (`.backlog-config.json`)
+      and `Status` typing are unrelated concerns that happen to both be
+      per-project config:
       ```json
       {
         "statuses": [
@@ -77,17 +96,40 @@ This check runs once per invocation, not per story in a batch request.
         ]
       }
       ```
-   d. Tell the human the folder and the prefix were set up
-4. **If it already exists** → read `backlog/.backlog-config.json` for `prefix` and `lastCode`, and `backlog/.backlog-statuses.json` for `statuses`. If `.backlog-config.json` is missing or incomplete (backlog created before this mechanism existed): infer the prefix from existing filenames (`^([A-Z]+)-\d{4}-`) if not already known, infer `lastCode` as the highest number found across existing `<PREFIX>-*.md` filenames (0 if none), and write it immediately so this inference never has to run again. If `.backlog-statuses.json` is missing (backlog created before *that* mechanism existed, even if `.backlog-config.json` is already current): create it with the same 3 defaults shown above. If there are no stories AND no config, fall back to Step 3a.
-5. **Never** create `backlog/` inside a subdirectory of the repo — it always lives at the root
-6. **`backlog/` is visible and version-controlled** — it is project documentation, not agent working memory, and that includes both `.backlog-config.json` and `.backlog-statuses.json`. Do NOT add any of them to `.gitignore` and do NOT create `backlog/` as a hidden `.backlog/`. (Contrast with `.workflow-dev/context/`, which IS hidden and gitignored because it's regenerable agent state.)
+   g. Tell the human the folder, the prefix, and the git-tracking choice were set up
+4. **If `local-backlog/` already exists** → read `local-backlog/.backlog-config.json` for
+   `prefix`, `lastCode`, and `gitignored`.
+   - If `.backlog-config.json` is missing or incomplete (backlog created before this
+     mechanism existed): infer the prefix from existing filenames (`^([A-Z]+)-\d{4}-`) if
+     not already known, infer `lastCode` as the highest number found across existing
+     `<PREFIX>-*.md` filenames (0 if none), and write it immediately so this inference never
+     has to run again.
+   - If `gitignored` is missing from an otherwise-current config (backlog created before
+     *that* field existed): this is exactly the Step 3b question, just asked retroactively
+     instead of at creation time — ask it now, once, and write the answer in. Don't infer or
+     default it silently.
+   - If `.backlog-statuses.json` is missing (backlog created before *that* mechanism
+     existed, even if `.backlog-config.json` is already current): create it with the same 3
+     defaults shown above.
+   - Once `gitignored` is known (whether just read or just asked), enforce it: if `true`,
+     confirm `local-backlog/` is actually listed in `.gitignore` (add it if missing — a human
+     could have hand-edited `.gitignore` since), AND check whether it's already tracked
+     (`git ls-files local-backlog/ | head -1`) — adding a path to `.gitignore` does nothing
+     to files already committed, so a retroactive `true` answer also needs
+     `git rm -r --cached local-backlog/` to actually untrack it (leave the files on disk;
+     this only removes them from git's index). If `false`, do nothing further.
+   - If there are no stories AND no config, fall back to Step 3a.
+5. **Never** create `local-backlog/` inside a subdirectory of the repo — it always lives at the root
+6. **`local-backlog/`'s git-tracking status is the human's own choice, made once** (Step 3b,
+   or retroactively per Step 4) — don't silently re-decide it, and don't assume either answer
+   by default the way earlier versions of this skill did (always tracked, never gitignored).
 7. **The prefix is fixed for the life of the project** — once `.backlog-config.json` exists, never ask again and never change it without the human explicitly requesting a rename (which would require renaming every existing story file too — treat that as its own deliberate task, not something to do in passing).
 
 ### Phase 2: Determine the next code
 
 **The counter lives in `.backlog-config.json` (`lastCode`), not in the filesystem
 listing.** This is deliberate: deriving the next number by scanning existing files
-(`ls backlog/<PREFIX>-*.md`, take the max, +1) has a real bug — if the
+(`ls local-backlog/<PREFIX>-*.md`, take the max, +1) has a real bug — if the
 highest-numbered story ever gets deleted, the next scan silently reuses its
 number. A persisted counter can't regress just because a file disappeared.
 
@@ -120,7 +162,7 @@ If several fields are already clear from context, present a **complete draft** a
 
 ### Phase 4: Write the file
 
-1. Filename: `backlog/<PREFIX>-XXXX-brief-description.md`
+1. Filename: `local-backlog/<PREFIX>-XXXX-brief-description.md`
    - `brief-description` is kebab-case, in the language the human is writing in, max ~5 words
    - Example (prefix `NB`): `NB-0001-syntax-highlighting-codeblock.md`
 2. Use the template from `references/template.md`
@@ -131,7 +173,7 @@ If several fields are already clear from context, present a **complete draft** a
 Tell the human:
 - The code assigned and the file path
 - A one-line summary of what was captured
-- That it can be picked up later with `/workflow-dev:init backlog/<PREFIX>-XXXX-....md`
+- That it can be picked up later with `/workflow-dev:init local-backlog/<PREFIX>-XXXX-....md`
 - That the backlog can be browsed with `/local-backlog:open-backlog`
 
 ## Creating several stories at once

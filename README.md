@@ -2,21 +2,21 @@
 
 For [Claude Code](https://code.claude.com) projects without access to a cloud-based issue tracker: create and manage stories as plain Markdown files, with auto-incrementing ticket codes and a searchable local viewer.
 
-"Local" means no external service dependency — not necessarily private. Files can be gitignored or committed with the rest of the repo, by choice.
+"Local" means no external service dependency — not necessarily private. `/local-backlog:create-story` asks once, on first use in a project, whether to gitignore the backlog or commit it with the rest of the repo — the right choice depends on whether the repo itself is meant to be shared (a maintainer's own working notes usually shouldn't ship to a plugin's/library's end users) or is a project where the backlog is legitimate shared documentation.
 
 ## Skills
 
 | Skill | What it does |
 |---|---|
-| `/local-backlog:create-story` | Creates a story in `backlog/` with an auto-incrementing `<PREFIX>-XXXX` code, in structured ticket shape |
+| `/local-backlog:create-story` | Creates a story in `local-backlog/` with an auto-incrementing `<PREFIX>-XXXX` code, in structured ticket shape |
 | `/local-backlog:update-status` | Changes a story's `Status`, keeping `Updated` and its `History` log in sync |
-| `/local-backlog:open-backlog` | Serves the bundled viewer against `backlog/` and opens it in your browser |
+| `/local-backlog:open-backlog` | Serves the bundled viewer against `local-backlog/` and opens it in your browser |
 | `/local-backlog:fix` | Diagnoses and fixes a broken or misbehaving backlog/viewer — missing stories, wrong statuses, malformed metadata |
 | `/local-backlog:help` | Shows the backlog's current state and available skills |
 
 ## The viewer
 
-A small pre-built React app, shipped ready to run — no `node`/`pnpm` needed to use it, only Python 3 to serve it locally (`python3 -m http.server` under the hood). It discovers stories live from `backlog/`: no manifest, no regeneration step. Edit a story and refresh the browser — the change is there.
+A small pre-built React app, shipped ready to run — no `node`/`pnpm` needed to use it, only Python 3 to serve it locally (`python3 -m http.server` under the hood). It discovers stories live from `local-backlog/`: no manifest, no regeneration step. Edit a story and refresh the browser — the change is there.
 
 Its source is a separate, independently versioned project: [`lbecjx/backlog-viewer`](https://github.com/lbecjx/backlog-viewer) (GPL-3.0-or-later, same author). This plugin only ships its pre-built output (`skills/open-backlog/dist/`); the app itself is never hand-edited from here.
 
@@ -29,7 +29,7 @@ Its source is a separate, independently versioned project: [`lbecjx/backlog-view
 
 ## Recommended alongside this plugin
 
-Once a story is created here, we suggest using [`workflow-dev`](https://github.com/lbecjx/workflow-dev) to actually work on it — `/workflow-dev:init backlog/<PREFIX>-XXXX-....md` works exactly like passing an external tracker's issue ID, and the rest of that plugin's flow (plan, implement, validate) picks up from there.
+Once a story is created here, we suggest using [`workflow-dev`](https://github.com/lbecjx/workflow-dev) to actually work on it — `/workflow-dev:init local-backlog/<PREFIX>-XXXX-....md` works exactly like passing an external tracker's issue ID, and the rest of that plugin's flow (plan, implement, validate) picks up from there.
 
 They're independent plugins, though — `local-backlog` has no awareness of `workflow-dev` and only creates/displays stories, with no opinion on how you implement them. Install either one on its own, or both; neither depends on the other.
 

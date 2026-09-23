@@ -14,6 +14,27 @@ All notable changes to this plugin are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/), versioning follows
 [Semantic Versioning](https://semver.org/).
 
+## 1.3.0
+
+- Renamed the project backlog folder from `backlog/` to `local-backlog/` — a
+  bare `backlog/` was too likely to collide with an unrelated folder a
+  project already had for its own purposes. `/local-backlog:fix` now detects
+  a legacy `backlog/` folder and offers to migrate it (rename plus updating
+  every story's own footer link).
+- `/local-backlog:create-story` now asks, once per project on first use,
+  whether `local-backlog/` should be gitignored or tracked in git — this
+  plugin previously hardcoded "always tracked, never gitignored," which
+  turned out to be the wrong default for a plugin/library repo, where a
+  maintainer's own working notes shouldn't ship to end users the same way a
+  project's real documentation should. The choice persists in
+  `.backlog-config.json`'s new `gitignored` field — asked once per project,
+  applied consistently from then on, never silently re-decided. When the
+  answer is asked retroactively on a folder git already tracks (an existing
+  project, or one migrating off the legacy `backlog/` name via
+  `/local-backlog:fix`), choosing `gitignored` also runs `git rm -r --cached`
+  on it — adding a path to `.gitignore` alone has no effect on files already
+  committed.
+
 ## 1.2.0
 
 - Added `/local-backlog:update-status` — the only supported way to change a

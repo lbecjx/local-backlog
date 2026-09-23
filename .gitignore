@@ -17,3 +17,9 @@ __pycache__/
 
 # workflow-dev's own persistent context — private, per-machine, regenerable
 .workflow-dev/
+
+# This repo's own dogfooded backlog — a maintainer's working notes on
+# implementing the plugin shouldn't ship to the plugin's own users. Chosen
+# via /local-backlog:create-story's own gitignore-or-track question; see
+# local-backlog/.backlog-config.json's "gitignored" field.
+local-backlog/
