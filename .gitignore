@@ -9,6 +9,11 @@
 __pycache__/
 *.pyc
 
+# Dev-only virtualenv for running tests/ — see tests/README.md. Never
+# required to install or use the plugin itself.
+.venv/
+.pytest_cache/
+
 # Logs
 *.log
 

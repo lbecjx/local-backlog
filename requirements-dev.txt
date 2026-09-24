@@ -1,0 +1,2 @@
+# Dev-only — never required to install or use this plugin. See tests/README.md.
+pytest>=8.0
