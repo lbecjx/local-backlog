@@ -8,9 +8,9 @@ the Free Software Foundation, either version 3 of the License, or
 (at your option) any later version. See LICENSE for the full text.
 -->
 
-# Template: backlog/<PREFIX>-XXXX-brief-description.md
+# Template: local-backlog/<PREFIX>-XXXX-brief-description.md
 
-`<PREFIX>` is the project's prefix, defined once in `backlog/.backlog-config.json`
+`<PREFIX>` is the project's prefix, defined once in `local-backlog/.backlog-config.json`
 (e.g. `NB`) — it's not re-asked for every story, it's read from there.
 
 ```markdown
@@ -71,7 +71,7 @@ from a concrete finding, include the finding — not just the conclusion.]
 
 ---
 
-> Generated with `/local-backlog:create-story`. To work on it: `/workflow-dev:init backlog/<PREFIX>-XXXX-....md`
+> Generated with `/local-backlog:create-story`. To work on it: `/workflow-dev:init local-backlog/<PREFIX>-XXXX-....md`
 ```
 
 ## Notes on the template

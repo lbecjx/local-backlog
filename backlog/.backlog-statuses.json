@@ -1,7 +1,0 @@
-{
-  "statuses": [
-    { "name": "Not Started", "color": "neutral" },
-    { "name": "In Progress", "color": "blue" },
-    { "name": "Done", "color": "green" }
-  ]
-}

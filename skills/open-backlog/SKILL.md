@@ -1,6 +1,6 @@
 ---
 name: open-backlog
-description: Serves the bundled backlog viewer app against the project's backlog/ folder and opens it in the default browser. Use when the user says "open backlog", "show stories", or "view the backlog".
+description: Serves the bundled backlog viewer app against the project's local-backlog/ folder and opens it in the default browser. Use when the user says "open backlog", "show stories", or "view the backlog".
 ---
 
 <!--
@@ -16,7 +16,7 @@ the Free Software Foundation, either version 3 of the License, or
 # Open Local Backlog
 
 Serves the plugin's bundled viewer (a small static React app, shipped pre-built
-in `dist/`) with the project's own `backlog/` folder wired in live — no
+in `dist/`) with the project's own `local-backlog/` folder wired in live — no
 generation step, no manifest, no rebuild. Edit a story's `.md` file and refresh
 the browser; the new content is there. This requires a local HTTP server (the
 viewer discovers stories via `fetch()`, which doesn't work over `file://`) —
@@ -32,7 +32,7 @@ reason this skill needs `python3` on the machine.
 ## When NOT to use
 
 - To create a story → use `/local-backlog:create-story`
-- To start work on a story → use `/workflow-dev:init backlog/<PREFIX>-XXXX-....md` (prefix is whatever this project chose — see `backlog/.backlog-config.json`)
+- To start work on a story → use `/workflow-dev:init local-backlog/<PREFIX>-XXXX-....md` (prefix is whatever this project chose — see `local-backlog/.backlog-config.json`)
 
 ## Execution
 
@@ -51,9 +51,11 @@ would. Do not paste the script's contents inline instead of calling the file
 — that's the one thing most likely to regress this if the skill is ever
 "cleaned up" later.
 
-The script does all of it in order: finds the repo root and its `backlog/`
+The script does all of it in order: finds the repo root and its `local-backlog/`
 folder, checks for `python3`, stages the pre-built viewer into a per-project
-temp directory with the real `backlog/` symlinked in live, starts (or reuses)
+temp directory with the real `local-backlog/` symlinked in live as `backlog/`
+(the path the bundled viewer's own code expects — an internal staging detail,
+not the project-facing folder name), starts (or reuses)
 the local server, and opens it in the default browser. On Windows, it uses a
 directory junction (`mklink /J`, no admin rights needed) instead of a symlink,
 and falls back to `xcopy /E /I` if that fails — that copy won't reflect future
@@ -64,7 +66,7 @@ Read the script's own output to know what happened, then report to the human:
 - **`NO_BACKLOG`** → there is no backlog yet; suggest `/local-backlog:create-story`. Do NOT create an empty folder just to open an empty viewer.
 - **`NO_PYTHON3`** → "This viewer needs Python 3 to serve the app locally (it discovers stories live over HTTP, unlike a single static file). Install it from python.org or your system's package manager, then try again." Do not attempt to install anything yourself.
 - **`NO_FREE_PORT`** → tell the human no port was free after 20 attempts, don't loop forever.
-- **`OPENED:<port>` / `STORIES:<n>`** → tell the human how many stories are in `backlog/`, the URL that was opened, and that it's a live server — editing a story and refreshing the page is enough, no need to re-run this skill (only re-run it if the server needs restarting, e.g. after a reboot). Keep it to two or three lines — the browser window is the real output.
+- **`OPENED:<port>` / `STORIES:<n>`** → tell the human how many stories are in `local-backlog/`, the URL that was opened, and that it's a live server — editing a story and refreshing the page is enough, no need to re-run this skill (only re-run it if the server needs restarting, e.g. after a reboot). Keep it to two or three lines — the browser window is the real output.
 
 ## What the viewer does
 
@@ -86,7 +88,7 @@ to regenerate when stories change.
   `dist/` is what ships in this skill's own `dist/` folder.
 - **The staging directory is disposable.** It's regenerated (app shell re-copied,
   backlog re-symlinked) on every invocation of this skill — nothing of value
-  lives there that isn't also in `<repo-root>/backlog/` or the plugin's `dist/`.
+  lives there that isn't also in `<repo-root>/local-backlog/` or the plugin's `dist/`.
 - **The server (`scripts/idle_server.py`) shuts itself down after 30 minutes
   with no requests**, so a forgotten viewer doesn't sit consuming RAM
   indefinitely. This needs no cleanup step: the next `open-backlog` run

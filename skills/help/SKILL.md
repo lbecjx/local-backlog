@@ -21,18 +21,18 @@ Detects whether this project has a local backlog yet and suggests the next step.
 
 ### Step 1: Detect project state
 
-Check for `backlog/` at the repo root (`git rev-parse --show-toplevel`, fall back to cwd):
+Check for `local-backlog/` at the repo root (`git rev-parse --show-toplevel`, fall back to cwd). If a legacy `backlog/` folder exists instead, suggest `/local-backlog:fix` to migrate it rather than treating it as "no backlog."
 
-1. **`backlog/` doesn't exist** → "No local backlog yet in this project. Run `/local-backlog:create-story` to create the first one."
-2. **`backlog/` exists with stories** → count the `<PREFIX>-*.md` files and list a few codes: "N stories in the local backlog (e.g. NB-0001, NB-0003). `/local-backlog:open-backlog` to browse them, or `/local-backlog:create-story` to add another."
-3. **`backlog/` exists but is empty** (config file only, no stories yet — unusual but possible if creation was interrupted) → "Backlog folder exists but has no stories yet. `/local-backlog:create-story` to create the first one."
+1. **`local-backlog/` doesn't exist** → "No local backlog yet in this project. Run `/local-backlog:create-story` to create the first one."
+2. **`local-backlog/` exists with stories** → count the `<PREFIX>-*.md` files and list a few codes: "N stories in the local backlog (e.g. NB-0001, NB-0003). `/local-backlog:open-backlog` to browse them, or `/local-backlog:create-story` to add another."
+3. **`local-backlog/` exists but is empty** (config file only, no stories yet — unusual but possible if creation was interrupted) → "Backlog folder exists but has no stories yet. `/local-backlog:create-story` to create the first one."
 
 ### Step 2: Show status and available skills
 
 ```
 Local Backlog — Status
 
-Backlog: backlog/ (N stories)
+Backlog: local-backlog/ (N stories)
 
 Available skills:
   /local-backlog:create-story  — Create a story with an auto-incrementing code
@@ -47,7 +47,7 @@ Available skills:
 This plugin only creates and displays stories — it has no opinion on how you implement them. Once you're ready to work on one:
 
 ```
-/workflow-dev:init backlog/<PREFIX>-XXXX-....md
+/workflow-dev:init local-backlog/<PREFIX>-XXXX-....md
 ```
 
 works exactly like passing an external tracker's issue ID — the `.md` file *is* the story.

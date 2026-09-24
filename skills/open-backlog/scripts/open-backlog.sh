@@ -19,7 +19,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DIST_DIR="$(cd "$SCRIPT_DIR/.." && pwd)/dist"
 
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-if [ ! -d "$REPO_ROOT/backlog" ]; then
+if [ ! -d "$REPO_ROOT/local-backlog" ]; then
   echo "NO_BACKLOG"
   exit 0
 fi
@@ -33,11 +33,15 @@ HASH=$(printf '%s' "$REPO_ROOT" | shasum | cut -c1-12)
 STAGE="${TMPDIR:-/tmp}/local-backlog-viewer/$HASH"
 mkdir -p "$STAGE"
 cp -R "$DIST_DIR/." "$STAGE/"
-ln -sfn "$REPO_ROOT/backlog" "$STAGE/backlog"
+# The staged symlink is still named "backlog" (not "local-backlog") because
+# that's the path the bundled viewer's own code fetches from
+# (getBacklogBaseUrl() in backlog-viewer's source) — an internal serving
+# detail, independent of what the project's own folder is called.
+ln -sfn "$REPO_ROOT/local-backlog" "$STAGE/backlog"
 
 # The authoritative status/color palette — the same file
 # update-status.sh and its SKILL.md reference by path — served at the app's
-# own root (not inside backlog/, which is per-project data) so the viewer's
+# own root (not inside local-backlog/, which is per-project data) so the viewer's
 # runtime fetch('/status-colors.json') resolves to this exact file. Copied
 # after dist/, deliberately overwriting any placeholder that ships inside
 # backlog-viewer's own build output (used only for that project's isolated
@@ -70,4 +74,4 @@ fi
 open "http://localhost:$PORT/" 2>/dev/null || xdg-open "http://localhost:$PORT/" 2>/dev/null
 
 echo "OPENED:$PORT"
-echo "STORIES:$(ls "$REPO_ROOT"/backlog/*.md 2>/dev/null | wc -l | tr -d ' ')"
+echo "STORIES:$(ls "$REPO_ROOT"/local-backlog/*.md 2>/dev/null | wc -l | tr -d ' ')"
