@@ -30,6 +30,25 @@ if [[ ! -f "$STORY_FILE" ]]; then
   exit 1
 fi
 
+# `mkdir` is atomic on any POSIX filesystem, which makes it a portable
+# mutex with no extra tooling (no `flock` CLI on macOS, and this script
+# stays plain bash/awk rather than pulling in python3 just for locking).
+# Needed because this script's own local server can now trigger it from
+# concurrent HTTP requests targeting the same story — without this, two
+# near-simultaneous calls read the same pre-write file and one silently
+# clobbers the other's History append.
+LOCK_DIR="${STORY_FILE}.lock"
+LOCK_WAIT=0
+until mkdir "$LOCK_DIR" 2>/dev/null; do
+  sleep 0.05
+  LOCK_WAIT=$((LOCK_WAIT + 1))
+  if [[ "$LOCK_WAIT" -ge 200 ]]; then
+    echo "Could not acquire lock on $STORY_FILE after 10s — another update may be stuck" >&2
+    exit 1
+  fi
+done
+trap 'rmdir "$LOCK_DIR" 2>/dev/null' EXIT
+
 OLD_STATUS=$(grep -m1 '^| \*\*Status\*\* |' "$STORY_FILE" | sed -E 's/^\| \*\*Status\*\* \| *(.*[^ ]) *\|$/\1/')
 
 if [[ -z "$OLD_STATUS" ]]; then
@@ -57,7 +76,13 @@ if [[ -f "$STATUSES_FILE" ]]; then
     echo "'$NEW_STATUS' isn't one of the statuses defined in $STATUSES_FILE:" >&2
     echo "$KNOWN_STATUSES" | sed 's/^/  - /' >&2
     echo "Use one of the above, or add \"$NEW_STATUS\" to that file's \"statuses\" list first." >&2
-    exit 1
+    # Exit 2, not the generic 1 every other failure in this script uses —
+    # this one specifically means "the caller asked for an invalid value,"
+    # not "something went wrong on this end" (a missing file, a stuck lock,
+    # a malformed story). A caller relaying this over HTTP (idle_server.py)
+    # uses this distinction to answer with a 400 instead of a 500 — the
+    # difference between a bad request and a server-side failure.
+    exit 2
   fi
 fi
 
