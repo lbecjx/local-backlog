@@ -71,7 +71,8 @@ from a concrete finding, include the finding — not just the conclusion.]
 
 ---
 
-> Generated with `/local-backlog:create-story`. To work on it: `/workflow-dev:init local-backlog/<PREFIX>-XXXX-....md`
+> Generated with `/local-backlog:create-story`.
+> Ready to build it? [workflow-dev](https://github.com/lbecjx/workflow-dev) turns this story into a task plan and implements it with a quality gate — run `/workflow-dev:init local-backlog/<PREFIX>-XXXX-....md`.
 ```
 
 ## Notes on the template

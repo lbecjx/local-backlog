@@ -14,6 +14,12 @@ All notable changes to this plugin are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/), versioning follows
 [Semantic Versioning](https://semver.org/).
 
+## 1.3.3
+
+- The story footer now links to `workflow-dev`, and `create-story`'s closing
+  note points at it (with the link) when `workflow-dev` isn't already available —
+  a discovery nudge for projects using only `local-backlog`, not a dependency.
+
 ## 1.3.2
 
 - Rebuilt and re-vendored the bundled viewer so it carries the client-side load
