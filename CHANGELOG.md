@@ -14,6 +14,15 @@ All notable changes to this plugin are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/), versioning follows
 [Semantic Versioning](https://semver.org/).
 
+## 1.5.0
+
+- `/local-backlog:fix` now detects stories that reached `Done` before the
+  `Resolution` field existed — they are `Done` with an empty `Resolution` — and
+  offers to backfill each with `resolution: Done`, repairing legacy data onto
+  the `Status: Done ⇒ Resolution set` invariant. The write goes through the same
+  update mechanism a `Done` transition uses and leaves the `Status` and the
+  `## History` log untouched, since no status change happens.
+
 ## 1.4.0
 
 - A story's **Resolution** is now a field of the story itself, alongside
