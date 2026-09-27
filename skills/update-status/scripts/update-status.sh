@@ -19,6 +19,9 @@
 # --resolution is required when moving into Done (from the canonical model) and
 # is written to the story's `Resolution` row (emptied when leaving Done).
 # --note is the optional free-text for the transition, written to the `Note` row.
+# Both also ride on the History line this script appends, after the new status
+# (` · Resolution: <value>`, then ` · Note: <text>`), so the transition's own
+# reason survives the next transition overwriting the single `Note` row.
 # A story already at Done with an empty Resolution is the legacy gap from before
 # the field existed: asking for it with --resolution fills only that row — the
 # Status does not change and no History line is added — so the invariant
@@ -199,6 +202,17 @@ if [[ "$BACKFILL" == "1" ]]; then
   HISTORY_LINE=""
 else
   HISTORY_LINE="- ${NOW_UTC} — Status: ${OLD_STATUS} → ${NEW_STATUS}"
+  # The transition's own resolution (only ever on a move into Done) and its
+  # optional note ride on the same line, in that order. The `Note` row alone
+  # can't hold a per-transition note: it is a single cell the next transition
+  # overwrites, so the `## History` line is the only place a note stays
+  # attached to the transition that produced it.
+  if [[ -n "$RESOLUTION" ]]; then
+    HISTORY_LINE="${HISTORY_LINE} · Resolution: ${RESOLUTION}"
+  fi
+  if [[ -n "$NOTE" ]]; then
+    HISTORY_LINE="${HISTORY_LINE} · Note: ${NOTE}"
+  fi
 fi
 EFFECTIVE_NOTE="$NOTE"
 if [[ "$BACKFILL" == "1" && -z "$NOTE" ]]; then

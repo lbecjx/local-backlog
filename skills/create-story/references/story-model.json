@@ -93,7 +93,7 @@
     },
     "historySection": {
       "heading": "## History",
-      "line": "- <at> — Status: <from> → <to>[ · Resolution: <resolution>]"
+      "line": "- <at> — Status: <from> → <to>[ · Resolution: <resolution>][ · Note: <note>]"
     },
     "enums": {
       "status": {
