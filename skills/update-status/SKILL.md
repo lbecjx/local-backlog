@@ -60,7 +60,47 @@ For an unambiguous case (human explicitly named the story and the target
 status) this confirmation can be a statement rather than a question — don't
 turn an explicit instruction into an extra round-trip.
 
-### Step 3: If the target is Done, gather the resolution first
+### Step 3: If the story is being started, offer the start setup
+
+"Starting to work on a story" is two moves that otherwise live in separate
+places: set the story `In Progress`, and put it on the Planner board. Offer both
+here, so the board doesn't silently drift behind the status.
+
+First see where the story stands: its current `Status` (Step 2 already showed
+it) and its board zone —
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/skills/update-status/scripts/get-board.sh" <path-to-story-file>
+```
+
+which prints `backlog`, `planner`, or `archive`. Then **skip the question** when
+it wouldn't be meaningful:
+
+- the zone is **`archive`** — a status or board change there is wrong;
+- the story is already `In Progress` **and** on `planner` — nothing left to offer;
+- the human is **closing** the story (target `Done` or `Blocked`), not starting it.
+
+Otherwise ask **once**, with the question tool, a single question carrying only
+the parts still missing, with **"Yes" as the default** (list it first):
+
+```
+[CODE]: set up for work?
+  (a) Status → In Progress        [Yes] [No]   (omit if already In Progress)
+  (b) Add to the Planner board    [Yes] [No]   (omit if already on Planner)
+```
+
+Apply each accepted part with its own script — never silently:
+
+- **(a)** is the normal status change: make `In Progress` the target status and
+  let Step 5 write it once (don't run the script twice).
+- **(b)** is a **zone-only** write that must **not** touch `Status`:
+  `bash "${CLAUDE_PLUGIN_ROOT}/skills/update-status/scripts/set-board.sh" <path-to-story-file> planner`.
+
+A declined part is left exactly as it was. When nobody can answer (unattended),
+don't guess at the board — skip the offer and just do the explicit status change
+the human asked for.
+
+### Step 4: If the target is Done, gather the resolution first
 
 `Done` also carries a *resolution*: which canonical outcome closed the story.
 The resolution values live in the same story model, under
@@ -75,7 +115,7 @@ question tool, offering the canonical values, rather than guessing:
 2. An optional `note` — one short line of *why* (the resolution says *which*,
    the note says *why*) — offering "skip" as a valid answer.
 
-Pass both to the script in Step 4. When running **unattended** (nobody to
+Pass both to the script in Step 5. When running **unattended** (nobody to
 ask — e.g. an automated archive), pick the most fitting canonical resolution
 yourself and write a one-line `note` explaining the choice, so the decision
 isn't silent.
@@ -84,7 +124,7 @@ Moving **out of** `Done` is the opposite: no resolution applies, so don't
 ask and don't pass one — the script clears the stored `Resolution` and `Note`
 rows.
 
-### Step 4: Run the script
+### Step 5: Run the script
 
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/skills/update-status/scripts/update-status.sh" <path-to-story-file> "<new-status>" [--resolution "<value>"] [--note "<text>"]
@@ -114,10 +154,10 @@ in the story model (`skills/create-story/references/story-model.json`, under
 the plugin and the viewer; there is no per-project list to edit.
 
 A move to `Done` with **no** resolution at all is the same kind of error
-(exit 2): ask the human which resolution applies (Step 3) and re-run with
+(exit 2): ask the human which resolution applies (Step 4) and re-run with
 it — never pass a placeholder to get past the check.
 
-### Step 5: Report
+### Step 6: Report
 
 Relay the script's own output — it already states the old/new status and the
 exact line it appended. Don't paraphrase the timestamp into your own summary:
