@@ -49,6 +49,11 @@ CODE_PATTERN = re.compile(r"^[A-Z]{2,6}-[0-9]{4}$")
 # _known_resolutions below), so there is no second list to keep in sync.
 VALID_ZONES = ("backlog", "planner", "archive")
 
+# These write endpoints only ever receive a small JSON object (a code plus a
+# status/zone/resolution/note). Cap the body so a bogus Content-Length can't
+# make the server read unbounded data or block on a negative read.
+MAX_BODY_BYTES = 1 << 20  # 1 MiB
+
 last_activity = time.time()
 activity_lock = threading.Lock()
 
@@ -300,11 +305,39 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self._send_json(404, {"error": f"no such endpoint: {self.path}"})
             return
 
-        length = int(self.headers.get("Content-Length", 0))
+        # int() on a non-numeric header raises, and a negative length makes
+        # rfile.read(-1) block until the client gives up — both were uncaught.
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+        except (TypeError, ValueError):
+            self._send_json(400, {"error": "invalid Content-Length"})
+            return
+        if length < 0:
+            self._send_json(400, {"error": "invalid Content-Length"})
+            return
+        if length > MAX_BODY_BYTES:
+            self._send_json(413, {"error": "request body too large"})
+            return
+        # UnicodeDecodeError (invalid UTF-8) is a sibling of JSONDecodeError
+        # here, not a subclass — catching only the latter let a raw bad byte
+        # crash the handler thread with no response.
         try:
             payload = json.loads(self.rfile.read(length))
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, UnicodeDecodeError):
             self._send_json(400, {"error": "malformed JSON body"})
+            return
+        # A body that is valid JSON but not an object (a list, number, string,
+        # null, boolean) would reach payload.get() and raise AttributeError out
+        # of this handler, dropping the connection with no response — every
+        # other bad input here gets a clean 400.
+        if not isinstance(payload, dict):
+            self._send_json(400, {"error": "JSON body must be an object"})
+            return
+        # A NUL byte cannot survive execve — passing one to subprocess.run
+        # raises "embedded null byte" and crashes the handler thread. Reject it
+        # here, before any field is read.
+        if any(isinstance(value, str) and "\x00" in value for value in payload.values()):
+            self._send_json(400, {"error": "field values must not contain NUL bytes"})
             return
 
         code = payload.get("code", "")

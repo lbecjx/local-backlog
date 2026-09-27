@@ -65,6 +65,21 @@ if [[ ! -f "$STORY_FILE" ]]; then
   exit 1
 fi
 
+# Each of these ends up inside one markdown table cell, so a raw newline (which
+# would also have made the awk below fail fatally) or a `|` (which would split
+# the row) is refused up front, before the lock is taken or anything is
+# written. Exit 2, the same "the caller asked for a bad value" code the status/
+# resolution checks below use, so an HTTP caller relays it as a 400.
+reject_bad_value() {
+  if [[ "$2" == *$'\n'* || "$2" == *$'\r'* || "$2" == *"|"* ]]; then
+    echo "$1 must be a single line, with no newline or '|' character." >&2
+    exit 2
+  fi
+}
+reject_bad_value status "$NEW_STATUS"
+reject_bad_value resolution "$RESOLUTION"
+reject_bad_value note "$NOTE"
+
 # `mkdir` is atomic on any POSIX filesystem, which makes it a portable
 # mutex with no extra tooling (no `flock` CLI on macOS, and this script
 # stays plain bash/awk rather than pulling in python3 just for locking).
@@ -160,7 +175,21 @@ HISTORY_LINE="- ${NOW_UTC} — Status: ${OLD_STATUS} → ${NEW_STATUS}"
 
 TMP_FILE=$(mktemp)
 
-awk -v new_status="$NEW_STATUS" -v today="$TODAY" -v history_line="$HISTORY_LINE" -v resolution="$RESOLUTION" -v note="$NOTE" '
+# The values are passed through the environment, not awk -v: -v runs each
+# through awk's own escape processing, so a backslash in a note (e.g. a Windows
+# path) was silently turned into a newline/tab and split the metadata table.
+# ENVIRON values are opaque byte strings. The single-line check above already
+# keeps a raw newline out of the program text entirely. The exit status is
+# checked before the move so an awk failure can never overwrite the story with
+# the empty temp file.
+if ! NEW_STATUS="$NEW_STATUS" TODAY="$TODAY" HISTORY_LINE="$HISTORY_LINE" RESOLUTION="$RESOLUTION" NOTE="$NOTE" awk '
+  BEGIN {
+    new_status = ENVIRON["NEW_STATUS"]
+    today = ENVIRON["TODAY"]
+    history_line = ENVIRON["HISTORY_LINE"]
+    resolution = ENVIRON["RESOLUTION"]
+    note = ENVIRON["NOTE"]
+  }
   /^\| \*\*Status\*\* \|/ {
     print "| **Status** | " new_status " |"
     print "| **Resolution** | " resolution " |"
@@ -179,9 +208,20 @@ awk -v new_status="$NEW_STATUS" -v today="$TODAY" -v history_line="$HISTORY_LINE
     next
   }
   { print }
-' "$STORY_FILE" > "$TMP_FILE"
+' "$STORY_FILE" > "$TMP_FILE"; then
+  rm -f "$TMP_FILE"
+  echo "Failed to rewrite $STORY_FILE — left unchanged." >&2
+  exit 1
+fi
 
-mv "$TMP_FILE" "$STORY_FILE"
+# The move is checked too: an unwritable target (e.g. an immutable story file)
+# would otherwise leave the story unchanged while the script still reported
+# success and printed the transition.
+if ! mv "$TMP_FILE" "$STORY_FILE"; then
+  rm -f "$TMP_FILE"
+  echo "Failed to write $STORY_FILE — left unchanged." >&2
+  exit 1
+fi
 
 echo "Status: ${OLD_STATUS} → ${NEW_STATUS}"
 [[ -n "$RESOLUTION" ]] && echo "Resolution: ${RESOLUTION}"

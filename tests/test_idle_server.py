@@ -12,11 +12,13 @@
 # fixture — the same way a browser client (or curl, during that manual
 # pass) actually would, not a mocked handler standing in for it.
 
-import json
+import socket
 import subprocess
 import sys
 import threading
 import time
+
+import pytest
 
 from conftest import post, IDLE_SERVER
 
@@ -120,6 +122,36 @@ class TestStatusEndpoint:
         scratch.write_story("QA-0001", "Not Started")
         status, body = post(base_url, "/api/status", {"code": "QA-0001", "status": "In Progress", "note": 123})
         assert status == 400
+
+    def test_non_object_json_body_returns_clean_400(self, server):
+        # Valid JSON that isn't an object used to reach payload.get() and crash
+        # the handler thread (connection reset, no response) instead of a 400.
+        base_url, scratch = server
+        scratch.write_story("QA-0001", "Not Started")
+        for body in ("[]", "null", "5", '"x"', "true"):
+            status, resp = post(base_url, "/api/status", body)
+            assert status == 400, f"body={body!r} should 400 cleanly, got {status}"
+
+    def test_note_with_a_newline_is_rejected_and_story_untouched(self, server):
+        # A raw newline in the note used to make update-status.sh's awk fail
+        # and truncate the story file to 0 bytes while reporting success.
+        base_url, scratch = server
+        scratch.write_story("QA-0001", "Not Started")
+        status, body = post(
+            base_url, "/api/status", {"code": "QA-0001", "status": "In Progress", "note": "a\nb"}
+        )
+        assert status == 400
+        assert scratch.status_of("QA-0001") == "Not Started"
+        assert not scratch.field("QA-0001", "Note")
+
+    def test_note_with_a_pipe_is_rejected(self, server):
+        base_url, scratch = server
+        scratch.write_story("QA-0001", "Not Started")
+        status, body = post(
+            base_url, "/api/status", {"code": "QA-0001", "status": "In Progress", "note": "a|b"}
+        )
+        assert status == 400
+        assert scratch.status_of("QA-0001") == "Not Started"
 
 
 class TestBoardEndpointZoneTransitions:
@@ -270,6 +302,45 @@ class TestInputRobustness:
         status, body = post(base_url, "/api/status", "not json{")
         assert status == 400
 
+    def test_invalid_utf8_body_returns_clean_400(self, server):
+        # UnicodeDecodeError is a sibling of JSONDecodeError, not a subclass —
+        # catching only the latter let a raw bad byte crash the handler thread.
+        base_url, _ = server
+        status, body = post(base_url, "/api/status", b"\xff")
+        assert status == 400
+
+    def test_nul_byte_in_a_field_returns_clean_400(self, server):
+        # A NUL can't survive execve — it used to crash the handler thread.
+        base_url, scratch = server
+        scratch.write_story("QA-0001", "Not Started")
+        for payload in (
+            {"code": "QA-0001", "status": "In Progress", "note": "a\u0000b"},
+            {"code": "QA-0001", "status": "In Progress\u0000"},
+        ):
+            status, body = post(base_url, "/api/status", payload)
+            assert status == 400, f"payload={payload!r} should 400 cleanly, got {status}"
+        assert scratch.status_of("QA-0001") == "Not Started"
+
+    def test_malformed_content_length_returns_clean_400(self, server):
+        # int() on a non-numeric Content-Length used to raise, and a negative
+        # one made rfile.read(-1) hang. Sent raw — urllib always sets a correct
+        # Content-Length.
+        base_url, scratch = server
+        scratch.write_story("QA-0001", "Not Started")
+        port = int(base_url.rsplit(":", 1)[1])
+        with socket.create_connection(("localhost", port), timeout=5) as sock:
+            sock.sendall(
+                (
+                    "POST /api/status HTTP/1.1\r\n"
+                    f"Host: localhost:{port}\r\n"
+                    f"Origin: {base_url}\r\n"
+                    "Content-Length: abc\r\n"
+                    "Connection: close\r\n\r\n"
+                ).encode()
+            )
+            first_line = sock.recv(4096).split(b"\r\n", 1)[0]
+        assert b" 400 " in first_line
+
     def test_ambiguous_code_rejected_without_touching_anything(self, server):
         base_url, scratch = server
         scratch.write_story("QA-0001", "Not Started")
@@ -413,3 +484,37 @@ class TestUpdateStatusResolution:
         story = self._story(tmp_path)
         r = self._run(str(story), "In Progress", "--resolution", "Done")
         assert r.returncode == 1
+
+    def test_note_with_a_newline_is_refused_without_touching_the_story(self, tmp_path):
+        story = self._story(tmp_path)
+        before = story.read_text()
+        r = self._run(str(story), "In Progress", "--note", "line1\nline2")
+        assert r.returncode == 2
+        assert story.read_text() == before
+
+    def test_backslash_in_note_is_preserved_literally(self, tmp_path):
+        # awk -v used to run the value through its own escape processing, so a
+        # backslash became a newline/tab and split the metadata table.
+        story = self._story(tmp_path)
+        r = self._run(str(story), "In Progress", "--note", "path C:\\new\\test")
+        assert r.returncode == 0
+        assert "| **Note** | path C:\\new\\test |" in story.read_text()
+
+    def test_pipe_in_note_is_refused(self, tmp_path):
+        story = self._story(tmp_path)
+        r = self._run(str(story), "In Progress", "--note", "a|b")
+        assert r.returncode == 2
+
+    @pytest.mark.skipif(sys.platform != "darwin", reason="chflags is macOS-specific")
+    def test_failed_write_leaves_the_story_unchanged(self, tmp_path):
+        # An unwritable target must fail loudly, not report success while the
+        # story stays on its old status (and leak the temp file).
+        story = self._story(tmp_path)
+        before = story.read_text()
+        subprocess.run(["chflags", "uchg", str(story)], check=True)
+        try:
+            r = self._run(str(story), "In Progress")
+            assert r.returncode == 1
+        finally:
+            subprocess.run(["chflags", "nouchg", str(story)], check=True)
+        assert story.read_text() == before
