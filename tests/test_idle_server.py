@@ -12,6 +12,7 @@
 # fixture — the same way a browser client (or curl, during that manual
 # pass) actually would, not a mocked handler standing in for it.
 
+import re
 import socket
 import subprocess
 import sys
@@ -560,6 +561,19 @@ class TestUpdateStatusResolution:
         assert "| **Resolution** | Done |" in text
         assert "| **Note** | kept |" in text
 
+    def test_backfill_never_overwrites_an_existing_note(self, tmp_path):
+        # The backfill is not a transition, so a note passed with it has nothing
+        # to attach to and no History line records the write. Overwriting would
+        # destroy the story's current note silently — reachable end to end from
+        # /api/board archiving a story that is already Done with an empty
+        # Resolution (the archive reason is forwarded as --note).
+        story = self._story(tmp_path, status="Done", resolution="", note="original legacy note")
+        r = self._run(str(story), "Done", "--resolution", "Won't Do", "--note", "archived because stale")
+        assert r.returncode == 0
+        text = story.read_text()
+        assert "| **Resolution** | Won't Do |" in text
+        assert "| **Note** | original legacy note |" in text
+
     def test_backfill_a_legacy_story_without_resolution_rows(self, tmp_path):
         # The real legacy shape: the story predates the Resolution/Note rows
         # entirely. The write inserts them (filled) rather than failing.
@@ -577,3 +591,139 @@ class TestUpdateStatusResolution:
         text = story.read_text()
         assert "| **Resolution** | Done |" in text
         assert "| **Note** |  |" in text
+
+
+class TestHistoryLineSegments:
+    """The appended `## History` line carries the transition's own Resolution
+    and Note — after the new status, in that order, and only when they exist.
+    The `Note` row can't hold more than the current one, so this line is what
+    keeps an earlier transition's reason readable."""
+
+    def _story(self, tmp_path, status="Not Started", resolution="", note="", after_history="\n---\n"):
+        backlog = tmp_path / "local-backlog"
+        backlog.mkdir()
+        story = backlog / "HS-0001-story.md"
+        story.write_text(
+            "# HS-0001 · x\n\n| Field | Value |\n|---|---|\n"
+            f"| **Code** | HS-0001 |\n| **Status** | {status} |\n"
+            f"| **Resolution** | {resolution} |\n| **Note** | {note} |\n"
+            "| **Updated** | 2026-01-01 |\n\n---\n\n"
+            "## History\n\n- 2026-01-01T00:00:00Z — Created\n"
+            f"{after_history}"
+        )
+        return story
+
+    def _run(self, *args):
+        script = IDLE_SERVER.parent.parent.parent / "update-status" / "scripts" / "update-status.sh"
+        return subprocess.run([str(script), *args], capture_output=True, text=True)
+
+    def _last_history_line(self, story):
+        return [line for line in story.read_text().splitlines() if line.startswith("- ")][-1]
+
+    def test_done_transition_records_resolution_then_note(self, tmp_path):
+        story = self._story(tmp_path)
+        r = self._run(str(story), "Done", "--resolution", "Done", "--note", "shipped in PR #14")
+        assert r.returncode == 0
+        assert re.fullmatch(
+            r"- \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z — Status: Not Started → Done"
+            r" · Resolution: Done · Note: shipped in PR #14",
+            self._last_history_line(story),
+        )
+
+    def test_done_transition_with_a_resolution_and_no_note(self, tmp_path):
+        # The most common real flow: a human skips the note on a Done move, so
+        # only the Resolution segment is present. A regression that dropped or
+        # duplicated it when no Note follows would otherwise go unnoticed.
+        story = self._story(tmp_path)
+        r = self._run(str(story), "Done", "--resolution", "Won't Do")
+        assert r.returncode == 0
+        assert re.fullmatch(
+            r"- \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z — Status: Not Started → Done"
+            r" · Resolution: Won't Do",
+            self._last_history_line(story),
+        )
+
+    def test_non_done_transition_with_a_note_records_only_the_note(self, tmp_path):
+        story = self._story(tmp_path)
+        r = self._run(str(story), "In Progress", "--note", "waiting on the payments API")
+        assert r.returncode == 0
+        assert re.fullmatch(
+            r"- \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z — Status: Not Started → In Progress"
+            r" · Note: waiting on the payments API",
+            self._last_history_line(story),
+        )
+
+    def test_transition_without_a_note_keeps_the_bare_line(self, tmp_path):
+        story = self._story(tmp_path)
+        r = self._run(str(story), "In Progress")
+        assert r.returncode == 0
+        assert re.fullmatch(
+            r"- \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z — Status: Not Started → In Progress",
+            self._last_history_line(story),
+        )
+
+    def test_leaving_done_does_not_leak_the_old_resolution_or_note(self, tmp_path):
+        # The story still carries a Resolution and a Note from its Done state;
+        # the new line describes only this transition, so neither may reappear
+        # on it (they are cleared from the rows instead).
+        story = self._story(tmp_path, status="Done", resolution="Won't Do", note="old reason")
+        r = self._run(str(story), "In Progress")
+        assert r.returncode == 0
+        assert re.fullmatch(
+            r"- \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z — Status: Done → In Progress",
+            self._last_history_line(story),
+        )
+
+    def test_a_note_containing_the_segment_marker_is_stored_verbatim(self, tmp_path):
+        # A note is free text; the plugin deliberately does not forbid `·` in
+        # it (only newlines, CR and `|`). Pin the writer's contract so the
+        # viewer's parser is written against a known shape: the text is stored
+        # exactly as given, unescaped — hence "split on the FIRST marker".
+        story = self._story(tmp_path)
+        note = "blocked · Note: not the marker"
+        r = self._run(str(story), "Blocked", "--note", note)
+        assert r.returncode == 0
+        assert self._last_history_line(story).endswith(f" — Status: Not Started → Blocked · Note: {note}")
+        assert f"| **Note** | {note} |" in story.read_text()
+
+    def _history_block(self, story):
+        """The text of the `## History` section up to the following separator."""
+        return story.read_text().split("## History", 1)[1].split("---", 1)[0]
+
+    def test_history_line_lands_inside_the_section_when_no_blank_line_follows(self, tmp_path):
+        # The section is followed straight by `---` instead of a blank line. The
+        # line must be inserted BEFORE that separator — it used to be appended
+        # after it, i.e. outside `## History` entirely.
+        story = self._story(tmp_path, after_history="---\n\n> footer\n")
+        r = self._run(str(story), "In Progress", "--note", "hello")
+        assert r.returncode == 0
+        assert " · Note: hello" in self._history_block(story)
+
+    def test_history_line_is_appended_when_the_section_ends_the_file(self, tmp_path):
+        # Nothing follows the last entry at all. The line must still land in the
+        # section: it used to be dropped while the script printed `Appended: …`
+        # and exited 0, and the note rides entirely on this line.
+        story = self._story(tmp_path, after_history="")
+        r = self._run(str(story), "In Progress", "--note", "hello")
+        assert r.returncode == 0
+        assert " · Note: hello" in self._history_block(story)
+        assert self._last_history_line(story).endswith("— Status: Not Started → In Progress · Note: hello")
+
+    def test_history_line_is_appended_into_a_section_with_no_entries(self, tmp_path):
+        # A malformed story whose `## History` has no entry at all (the template
+        # always writes a "Created" one). The line must still be written — as the
+        # section's first entry — instead of the script reporting `Appended: …`
+        # while dropping it, which lost the note with it.
+        backlog = tmp_path / "local-backlog"
+        backlog.mkdir()
+        story = backlog / "HS-0002-story.md"
+        story.write_text(
+            "# HS-0002 · x\n\n| Field | Value |\n|---|---|\n"
+            "| **Code** | HS-0002 |\n| **Status** | Not Started |\n"
+            "| **Resolution** |  |\n| **Note** |  |\n"
+            "| **Updated** | 2026-01-01 |\n\n---\n\n"
+            "## History\n\n---\n"
+        )
+        r = self._run(str(story), "In Progress", "--note", "hello")
+        assert r.returncode == 0
+        assert " · Note: hello" in self._history_block(story)

@@ -14,6 +14,23 @@ All notable changes to this plugin are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/), versioning follows
 [Semantic Versioning](https://semver.org/).
 
+## 1.7.0
+
+- Any status change can now carry an optional **note**, not just a move to
+  `Done`. `/local-backlog:update-status` asks for a one-line note on every
+  transition, and "skip" is a valid answer; when there is nobody to ask, it
+  writes one explaining the move instead of letting the change pass silently.
+- The note — and the `Resolution`, when the move closes the story — is now
+  recorded on the story's `## History` line, after the new status:
+  `… — Status: <old> → <new> · Resolution: <value> · Note: <text>`. Each earlier
+  transition therefore keeps its own reason, instead of only the most recent one
+  surviving in the story's `Note` row.
+- The transition line is now written wherever a story's history section ends —
+  including when it ends the file, or runs straight into a separator — so a
+  transition and the note it carries are never dropped while the command reports
+  them as appended. A legacy backfill likewise no longer overwrites an existing
+  `Note` row.
+
 ## 1.6.0
 
 - `/local-backlog:update-status` now offers to set a story `In Progress` and add

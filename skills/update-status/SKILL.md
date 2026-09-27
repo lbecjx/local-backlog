@@ -92,8 +92,8 @@ the parts still missing, with **"Yes" as the default** (list it first):
 Apply each accepted part with its own script — never silently:
 
 - **(a)** is the normal status change: make `In Progress` the target status and
-  let Step 5 write it once (don't run the script twice). If (a) is **declined**,
-  the target stays the story's current status — Step 5 must not write `In
+  let Step 6 write it once (don't run the script twice). If (a) is **declined**,
+  the target stays the story's current status — Step 6 must not write `In
   Progress` in that case. A declined status change is never applied.
 - **(b)** is a **zone-only** write that must **not** touch `Status`:
   `bash "${CLAUDE_PLUGIN_ROOT}/skills/update-status/scripts/set-board.sh" <path-to-story-file> planner`.
@@ -111,22 +111,44 @@ The resolution values live in the same story model, under
 without it.
 
 When a human is in the loop, **they choose the resolution** — ask with the
-question tool, offering the canonical values, rather than guessing:
-
-1. Which resolution applies.
-2. An optional `note` — one short line of *why* (the resolution says *which*,
-   the note says *why*) — offering "skip" as a valid answer.
-
-Pass both to the script in Step 5. When running **unattended** (nobody to
-ask — e.g. an automated archive), pick the most fitting canonical resolution
-yourself and write a one-line `note` explaining the choice, so the decision
-isn't silent.
+question tool, offering the canonical values, rather than guessing. Pass it to
+the script in Step 6. When running **unattended** (nobody to ask — e.g. an
+automated archive), pick the most fitting canonical resolution yourself, so the
+decision isn't silent.
 
 Moving **out of** `Done` is the opposite: no resolution applies, so don't
 ask and don't pass one — the script clears the stored `Resolution` and `Note`
 rows.
 
-### Step 5: Run the script
+The *why* is not asked here: it is the note, and it applies to every
+transition — see Step 5.
+
+### Step 5: Gather the note (any transition)
+
+Any status change may carry an optional one-line note of *why* — the
+resolution says *which* outcome closed the story, the note says *why* it
+moved. It is deliberately the **same concept for every transition**, `Done`
+included; there is no separate "reason" that only applies to archiving.
+
+When a human is in the loop, ask **once**, with the question tool, offering
+**skip** as a valid answer:
+
+```
+[CODE]: note for this change?   (optional — one short line)
+```
+
+The note is never required, for any target status: a skipped note is simply no
+note — the transition still goes through, and the story's `Note` row ends up
+empty because *this* change carries nothing to say (see the `Note` row's own
+wording in `skills/create-story/references/template.md`). Pass whatever the
+human gave to the script in Step 6.
+
+When running **unattended** (nobody to ask), don't leave it blank: infer a
+short note from the transition itself — why the story moved, in one line — and
+write it, so the change doesn't land silently. Same rule as the resolution
+above, for the same reason.
+
+### Step 6: Run the script
 
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/skills/update-status/scripts/update-status.sh" <path-to-story-file> "<new-status>" [--resolution "<value>"] [--note "<text>"]
@@ -134,11 +156,14 @@ bash "${CLAUDE_PLUGIN_ROOT}/skills/update-status/scripts/update-status.sh" <path
 
 This does all the writes together, from a real clock:
 - Updates the `| **Status** |` row
-- Sets the `| **Resolution** |` and `| **Note** |` rows — a value when moving
-  into `Done`, empty otherwise — inserting those rows after `Status` if the
-  story predates them
+- Sets the `| **Resolution** |` and `| **Note** |` rows — `Resolution` when
+  moving into `Done`, the `Note` from this transition, empty otherwise —
+  inserting those rows after `Status` if the story predates them
 - Updates the `| **Updated** |` row to the same date
-- Appends `- YYYY-MM-DDTHH:MM:SSZ — Status: <old> → <new>` to `## History`
+- Appends `- YYYY-MM-DDTHH:MM:SSZ — Status: <old> → <new>` to `## History`,
+  with ` · Resolution: <value>` and then ` · Note: <text>` appended when the
+  transition carries them — so each earlier transition keeps its own reason,
+  which the single `Note` row above cannot
 
 Never hand-edit these spots separately — that's exactly the kind of
 multi-location update that drifts (a `Status` change without the matching
@@ -159,7 +184,7 @@ A move to `Done` with **no** resolution at all is the same kind of error
 (exit 2): ask the human which resolution applies (Step 4) and re-run with
 it — never pass a placeholder to get past the check.
 
-### Step 6: Report
+### Step 7: Report
 
 Relay the script's own output — it already states the old/new status and the
 exact line it appended. Don't paraphrase the timestamp into your own summary:
@@ -174,7 +199,12 @@ stale or wrong.
   of them by hand.
 - **Resolution is the human's call** — for a move to `Done`, the human picks
   which canonical resolution applies; choose it yourself only when
-  unattended, and write a `note` so the choice isn't silent.
+  unattended, so the decision isn't silent.
+- **The note is optional for a human, never blank unattended** — on any
+  transition a human may skip it, and skipping writes no note at all (never
+  invent one they declined); with nobody to ask, the agent infers a one-line
+  note and writes it, so the change isn't silent. Optional and unattended are
+  not in conflict: they are the two halves of the same rule.
 - **Real clock, not a guess** — the timestamp always comes from `date -u`
   inside the script, never typed or estimated.
 - **History is append-only** — past entries are never edited or removed, even
