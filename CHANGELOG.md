@@ -14,6 +14,27 @@ All notable changes to this plugin are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/), versioning follows
 [Semantic Versioning](https://semver.org/).
 
+## 1.4.0
+
+- A story's **Resolution** is now a field of the story itself, alongside
+  `Status`, instead of being recorded in the board's archive list. Moving a
+  story to `Done` **requires** a resolution from a fixed set — `Done`,
+  `Won't Do`, `Duplicate`, `Cannot Reproduce` — and leaving `Done` clears it.
+  The Done transition can also carry a short free-text `Note`. The story
+  template now includes both rows, empty until first used.
+- The entire story model — the `Status` values with their colors, the
+  `Resolution` values, the story's own fields, and the shape of its `## History`
+  log — now lives once in `skills/create-story/references/story-model.json`
+  (JSON Schema): the single source read by this plugin's scripts and served to
+  the viewer, which derives its schema from it. It replaces the separate
+  `status-colors.json` and the per-project `.backlog-statuses.json` — statuses
+  and resolutions are canonical now, with no per-project list to maintain.
+- Archiving no longer stores the resolution and reason in
+  `.backlog-board.json` — an archive entry is just `{ "code": … }`, and
+  archiving still lands the resolution on the story. The local write endpoints
+  validate a resolution against the model and reject a `Done` transition
+  without a valid one with a clean `400`.
+
 ## 1.3.3
 
 - The story footer now links to `workflow-dev`, and `create-story`'s closing

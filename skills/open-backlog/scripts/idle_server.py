@@ -42,12 +42,17 @@ SET_BOARD_SCRIPT = os.path.join(SCRIPT_DIR, "..", "..", "update-status", "script
 # by hand if the <PREFIX>-XXXX format ever changes.
 CODE_PATTERN = re.compile(r"^[A-Z]{2,6}-[0-9]{4}$")
 
-# Zone and resolution values, duplicated as literals in
-# update-status/scripts/set-board.sh (which validates them again on its
-# own side, independent of this server) — same "keep in sync by hand" note
-# as CODE_PATTERN above.
+# Zone values, duplicated as literals in update-status/scripts/set-board.sh
+# (which validates them again on its own side, independent of this server) —
+# same "keep in sync by hand" note as CODE_PATTERN above. Resolution values
+# are NOT duplicated here: they are read from the canonical story model (see
+# _known_resolutions below), so there is no second list to keep in sync.
 VALID_ZONES = ("backlog", "planner", "archive")
-VALID_RESOLUTIONS = ("Done", "Won't Do")
+
+# These write endpoints only ever receive a small JSON object (a code plus a
+# status/zone/resolution/note). Cap the body so a bogus Content-Length can't
+# make the server read unbounded data or block on a negative read.
+MAX_BODY_BYTES = 1 << 20  # 1 MiB
 
 last_activity = time.time()
 activity_lock = threading.Lock()
@@ -115,19 +120,37 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             pass
         return None
 
-    def _known_statuses(self, story_file):
-        # None means "no closed list for this project" (any status accepted,
-        # same backward-compat rule update-status.sh itself follows) — not
-        # the same as an empty list, which would mean "nothing is valid."
-        statuses_file = os.path.join(os.path.dirname(story_file), ".backlog-statuses.json")
-        if not os.path.isfile(statuses_file):
-            return None
+    def _load_model(self):
+        # The canonical Status and Resolution values live in the story model
+        # (the single source), not in a per-project file. None on an
+        # unreadable model means "no closed list" — permissive, matching the
+        # old backward-compat rule rather than failing hard.
+        model_file = os.path.join(SCRIPT_DIR, "..", "..", "create-story", "references", "story-model.json")
         try:
-            with open(statuses_file) as f:
-                data = json.load(f)
-            return {entry["name"] for entry in data.get("statuses", [])}
-        except (OSError, json.JSONDecodeError, KeyError, TypeError):
+            with open(model_file) as f:
+                return json.load(f)
+        except (OSError, json.JSONDecodeError):
             return None
+
+    def _known_statuses(self):
+        try:
+            return {entry["name"] for entry in self._load_model()["x-story-file"]["enums"]["status"]["values"]}
+        except (KeyError, TypeError):
+            return None
+
+    def _known_resolutions(self):
+        try:
+            return list(self._load_model()["x-story-file"]["enums"]["resolution"]["values"])
+        except (KeyError, TypeError):
+            return None
+
+    def _resolution_error(self, known_resolutions):
+        # The 400 body both /api/status (a Done target) and /api/board
+        # (archive) return when the resolution is missing or outside the
+        # canonical set.
+        if known_resolutions is None:
+            return "'resolution' is required and must be a canonical value"
+        return f"'resolution' is required and must be one of: {', '.join(sorted(known_resolutions))}"
 
     def _from_this_server(self):
         # This server was read-only until this task group — no other page
@@ -153,7 +176,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             # this request's handler thread.
             return False
 
-    def _handle_archive(self, story_file, board_args):
+    def _handle_archive(self, story_file, board_args, resolution, note):
         # AC #9: archiving a story that isn't already Done must set its
         # Status to Done. update-status.sh already no-ops cleanly ("Status
         # is already 'Done' — nothing to do.") when it's called with the
@@ -169,15 +192,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         # If the rollback below ever has to run, it re-sets Status to
         # old_status — which only works if old_status is itself a
         # recognized value (update-status.sh validates whatever it's asked
-        # to SET, not what a file already has). A story whose Status
-        # predates .backlog-statuses.json, or was left invalid by some
-        # other means, would make that rollback call fail the same
-        # closed-list check meant to prevent bad data — leaving the story
-        # stuck at Done with nothing ever recorded in Archive and no way
-        # back except a hand edit. Refusing up front, before touching
-        # anything, is what keeps the closed list an actual guarantee
-        # instead of one with a rollback-shaped hole in it.
-        known_statuses = self._known_statuses(story_file)
+        # to SET, not what a file already has). A story left with a Status
+        # outside the canonical set (a legacy value, a hand-edit typo) would
+        # make that rollback call fail the same closed-list check meant to
+        # prevent bad data — leaving the story stuck at Done with nothing
+        # ever recorded in Archive and no way back except a hand edit.
+        # Refusing up front, before touching anything, keeps the closed list
+        # an actual guarantee instead of one with a rollback-shaped hole.
+        known_statuses = self._known_statuses()
         if old_status is not None and known_statuses is not None and old_status not in known_statuses:
             self._send_json(
                 409,
@@ -188,12 +210,17 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             )
             return
 
-        status_result = subprocess.run([UPDATE_STATUS_SCRIPT, story_file, "Done"], capture_output=True, text=True)
+        # The resolution (and any free-text note) belong to the story — they
+        # go through update-status.sh into its Resolution/Note rows; the board
+        # write below carries only the code.
+        status_args = [UPDATE_STATUS_SCRIPT, story_file, "Done", "--resolution", resolution]
+        if note:
+            status_args += ["--note", note]
+        status_result = subprocess.run(status_args, capture_output=True, text=True)
         if status_result.returncode != 0:
             # Exit code 2 means update-status.sh rejected "Done" itself as
-            # not one of this project's known statuses (a customized
-            # .backlog-statuses.json that dropped it) — a bad request, not
-            # a server-side failure; everything else (1) stays a 500.
+            # not one of the canonical statuses (a model that dropped it) — a
+            # bad request, not a server-side failure; everything else (1) stays a 500.
             error_status = 400 if status_result.returncode == 2 else 500
             self._send_json(
                 error_status,
@@ -226,14 +253,27 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self._send_json(500, {"error": board_error})
             return
 
-        # A *second* concurrent write could still land between our own Done
-        # write above and this rollback — the same class of window, one
-        # step later. Re-reading Status right before rolling back and only
-        # doing so if it's still exactly what OUR own write just set
-        # ("Done") closes that one too: if someone else already moved it on
-        # again, we leave their value alone instead of clobbering it.
-        current_status = self._read_status(story_file)
-        if current_status != "Done":
+        # The concurrent-write window is closed by a compare-and-swap: the
+        # rollback runs `update-status.sh ... --expect Done`, which applies
+        # only if the story is still exactly at the "Done" our own write set —
+        # checked and written inside that script's own lock, so a second
+        # concurrent write can't slip between the check and the write. Exit 3
+        # means the status moved on (someone else owns it now) → leave it; never
+        # clobber a newer write with a value from before this request.
+        #
+        # Known, accepted limitation: a successful rollback still leaves two
+        # real History lines (old→Done, then Done→old) for an action the human
+        # experiences as one failed attempt — the History format has no way to
+        # mark an entry as "part of a rolled-back sequence". Correctness (Status
+        # ends up back where it was) matters more than the cosmetic double-entry.
+        rollback = subprocess.run(
+            [UPDATE_STATUS_SCRIPT, story_file, rollback_target, "--expect", "Done"],
+            capture_output=True,
+            text=True,
+        )
+        if rollback.returncode == 0:
+            self._send_json(500, {"error": f"Archiving failed, Status rolled back: {board_error}"})
+        elif rollback.returncode == 3:
             self._send_json(
                 500,
                 {
@@ -242,18 +282,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 },
             )
             return
-
-        # Known, accepted limitation: a successful rollback still leaves
-        # two real History lines (old→Done, then Done→old) for an action
-        # the human experiences as a single failed attempt —
-        # update-status.sh's History format has no way to mark an entry as
-        # "part of a rolled-back sequence." Correctness (Status ends up
-        # back where it was) matters more here than the cosmetic
-        # double-entry, and the story's own error response below says
-        # plainly that it was rolled back.
-        rollback = subprocess.run([UPDATE_STATUS_SCRIPT, story_file, rollback_target], capture_output=True, text=True)
-        if rollback.returncode == 0:
-            self._send_json(500, {"error": f"Archiving failed, Status rolled back: {board_error}"})
         else:
             self._send_json(
                 500,
@@ -277,11 +305,39 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self._send_json(404, {"error": f"no such endpoint: {self.path}"})
             return
 
-        length = int(self.headers.get("Content-Length", 0))
+        # int() on a non-numeric header raises, and a negative length makes
+        # rfile.read(-1) block until the client gives up — both were uncaught.
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+        except (TypeError, ValueError):
+            self._send_json(400, {"error": "invalid Content-Length"})
+            return
+        if length < 0:
+            self._send_json(400, {"error": "invalid Content-Length"})
+            return
+        if length > MAX_BODY_BYTES:
+            self._send_json(413, {"error": "request body too large"})
+            return
+        # UnicodeDecodeError (invalid UTF-8) is a sibling of JSONDecodeError
+        # here, not a subclass — catching only the latter let a raw bad byte
+        # crash the handler thread with no response.
         try:
             payload = json.loads(self.rfile.read(length))
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, UnicodeDecodeError):
             self._send_json(400, {"error": "malformed JSON body"})
+            return
+        # A body that is valid JSON but not an object (a list, number, string,
+        # null, boolean) would reach payload.get() and raise AttributeError out
+        # of this handler, dropping the connection with no response — every
+        # other bad input here gets a clean 400.
+        if not isinstance(payload, dict):
+            self._send_json(400, {"error": "JSON body must be an object"})
+            return
+        # A NUL byte cannot survive execve — passing one to subprocess.run
+        # raises "embedded null byte" and crashes the handler thread. Reject it
+        # here, before any field is read.
+        if any(isinstance(value, str) and "\x00" in value for value in payload.values()):
+            self._send_json(400, {"error": "field values must not contain NUL bytes"})
             return
 
         code = payload.get("code", "")
@@ -303,7 +359,31 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             if not isinstance(status, str) or not status:
                 self._send_json(400, {"error": "missing 'status'"})
                 return
+            resolution = payload.get("resolution")
+            if resolution is not None and not isinstance(resolution, str):
+                self._send_json(400, {"error": "'resolution' must be a string"})
+                return
+            # Resolution belongs to the Done transition alone: required for a
+            # Done target, rejected for any other. Checked against the canonical
+            # model here so an unlisted value is a clean 400; update-status.sh
+            # re-checks it authoritatively before writing.
+            known_resolutions = self._known_resolutions()
+            if status == "Done":
+                if not resolution or (known_resolutions is not None and resolution not in known_resolutions):
+                    self._send_json(400, {"error": self._resolution_error(known_resolutions)})
+                    return
+            elif resolution:
+                self._send_json(400, {"error": "'resolution' only applies to a 'Done' transition"})
+                return
+            note = payload.get("note")
+            if note is not None and not isinstance(note, str):
+                self._send_json(400, {"error": "'note' must be a string"})
+                return
             args = [UPDATE_STATUS_SCRIPT, story_file, status]
+            if resolution:
+                args += ["--resolution", resolution]
+            if note:
+                args += ["--note", note]
         else:  # self.path == "/api/board" — the only other value possible after the check above
             zone = payload.get("zone", "")
             if zone not in VALID_ZONES:
@@ -318,23 +398,32 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             if resolution is not None and not isinstance(resolution, str):
                 self._send_json(400, {"error": "'resolution' must be a string"})
                 return
-            if zone == "archive" and resolution not in VALID_RESOLUTIONS:
-                self._send_json(
-                    400, {"error": f"archiving requires 'resolution' to be one of: {', '.join(VALID_RESOLUTIONS)}"}
-                )
+            # The board no longer carries a resolution: archiving is a Done
+            # transition, so the resolution goes to the story via
+            # update-status.sh (inside _handle_archive). It is required here,
+            # and validated against the canonical model, so a missing or
+            # unlisted one is a clean 400 before anything is touched.
+            known_resolutions = self._known_resolutions()
+            if zone == "archive":
+                if not resolution or (known_resolutions is not None and resolution not in known_resolutions):
+                    self._send_json(400, {"error": self._resolution_error(known_resolutions)})
+                    return
+            elif resolution:
+                self._send_json(400, {"error": "'resolution' only applies when archiving"})
                 return
-            reason = payload.get("reason")
-            if reason is not None and not isinstance(reason, str):
-                self._send_json(400, {"error": "'reason' must be a string"})
+            # 'reason' is the free-text the current viewer sends with an
+            # archive; it maps to the story's Note. 'note' is the canonical
+            # name and wins when both are present.
+            note = payload.get("note")
+            if note is None:
+                note = payload.get("reason")
+            if note is not None and not isinstance(note, str):
+                self._send_json(400, {"error": "'note'/'reason' must be a string"})
                 return
             board_args = [SET_BOARD_SCRIPT, story_file, zone]
-            if resolution is not None:
-                board_args += ["--resolution", resolution]
-            if reason:
-                board_args += ["--reason", reason]
 
             if zone == "archive":
-                self._handle_archive(story_file, board_args)
+                self._handle_archive(story_file, board_args, resolution, note)
                 return
 
             args = board_args

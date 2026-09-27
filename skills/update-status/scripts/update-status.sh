@@ -14,14 +14,49 @@
 # time; a model hand-editing three separate spots in a markdown file is
 # exactly the kind of task that drifts.
 #
-# Usage: update-status.sh <story-file> <new-status>
+# Usage: update-status.sh <story-file> <new-status> [--resolution <value>] [--note <text>] [--expect <status>]
 # Prints the old and new status, and the exact History line appended.
+# --resolution is required when moving into Done (from the canonical model) and
+# is written to the story's `Resolution` row (emptied when leaving Done).
+# --note is the optional free-text for the transition, written to the `Note` row.
+# With --expect, the change applies only if the story's current status still
+# equals <status> — a compare-and-swap evaluated and written inside the same
+# lock, so it can't race a concurrent write. Exit 3 = precondition failed (the
+# status moved on); nothing is written.
 
 STORY_FILE="$1"
 NEW_STATUS="$2"
+shift 2 2>/dev/null || true
+
+EXPECT=""
+RESOLUTION=""
+NOTE=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --expect)
+      if [[ $# -lt 2 ]]; then
+        echo "--expect requires a value" >&2
+        exit 1
+      fi
+      EXPECT="$2"; shift 2 ;;
+    --resolution)
+      if [[ $# -lt 2 ]]; then
+        echo "--resolution requires a value" >&2
+        exit 1
+      fi
+      RESOLUTION="$2"; shift 2 ;;
+    --note)
+      if [[ $# -lt 2 ]]; then
+        echo "--note requires a value" >&2
+        exit 1
+      fi
+      NOTE="$2"; shift 2 ;;
+    *) echo "Unknown argument: $1" >&2; exit 1 ;;
+  esac
+done
 
 if [[ -z "$STORY_FILE" || -z "$NEW_STATUS" ]]; then
-  echo "Usage: update-status.sh <story-file> <new-status>" >&2
+  echo "Usage: update-status.sh <story-file> <new-status> [--resolution <value>] [--note <text>] [--expect <status>]" >&2
   exit 1
 fi
 
@@ -29,6 +64,21 @@ if [[ ! -f "$STORY_FILE" ]]; then
   echo "No such file: $STORY_FILE" >&2
   exit 1
 fi
+
+# Each of these ends up inside one markdown table cell, so a raw newline (which
+# would also have made the awk below fail fatally) or a `|` (which would split
+# the row) is refused up front, before the lock is taken or anything is
+# written. Exit 2, the same "the caller asked for a bad value" code the status/
+# resolution checks below use, so an HTTP caller relays it as a 400.
+reject_bad_value() {
+  if [[ "$2" == *$'\n'* || "$2" == *$'\r'* || "$2" == *"|"* ]]; then
+    echo "$1 must be a single line, with no newline or '|' character." >&2
+    exit 2
+  fi
+}
+reject_bad_value status "$NEW_STATUS"
+reject_bad_value resolution "$RESOLUTION"
+reject_bad_value note "$NOTE"
 
 # `mkdir` is atomic on any POSIX filesystem, which makes it a portable
 # mutex with no extra tooling (no `flock` CLI on macOS, and this script
@@ -56,34 +106,62 @@ if [[ -z "$OLD_STATUS" ]]; then
   exit 1
 fi
 
+# Compare-and-swap precondition (see --expect above): checked here, inside the
+# lock, so no concurrent write can slip between this check and the write below.
+if [[ -n "$EXPECT" && "$OLD_STATUS" != "$EXPECT" ]]; then
+  echo "changed concurrently: expected '$EXPECT' but found '$OLD_STATUS' — not applying" >&2
+  exit 3
+fi
+
 if [[ "$OLD_STATUS" == "$NEW_STATUS" ]]; then
   echo "Status is already '$OLD_STATUS' — nothing to do."
   exit 0
 fi
 
-# `.backlog-statuses.json` living alongside the story file (a separate file
-# from `.backlog-config.json`, which is only about ticket numbering — prefix
-# and lastCode, unrelated to Status) is the closest thing this project has to
-# a type for Status: if it exists, its list is closed — an unlisted value is
-# rejected rather than silently accepted (a typo would otherwise pass right
-# through, string comparisons being case- and spelling-sensitive). No such
-# file means the project hasn't opted into this — any string is accepted,
-# same as before this existed.
-STATUSES_FILE="$(dirname "$STORY_FILE")/.backlog-statuses.json"
-if [[ -f "$STATUSES_FILE" ]]; then
-  KNOWN_STATUSES=$(grep -o '"name"[[:space:]]*:[[:space:]]*"[^"]*"' "$STATUSES_FILE" | sed -E 's/.*"([^"]*)"$/\1/')
-  if ! grep -qxF "$NEW_STATUS" <<< "$KNOWN_STATUSES"; then
-    echo "'$NEW_STATUS' isn't one of the statuses defined in $STATUSES_FILE:" >&2
-    echo "$KNOWN_STATUSES" | sed 's/^/  - /' >&2
-    echo "Use one of the above, or add \"$NEW_STATUS\" to that file's \"statuses\" list first." >&2
-    # Exit 2, not the generic 1 every other failure in this script uses —
-    # this one specifically means "the caller asked for an invalid value,"
-    # not "something went wrong on this end" (a missing file, a stuck lock,
-    # a malformed story). A caller relaying this over HTTP (idle_server.py)
-    # uses this distinction to answer with a 400 instead of a 500 — the
-    # difference between a bad request and a server-side failure.
+# Status values are canonical now: they live in the story model (the single
+# source), not in a per-project file. The model is read with python3 — already
+# a hard dependency of this plugin — because it is nested JSON, where grep/sed
+# would be fragile. An unlisted value is rejected rather than silently accepted
+# (a typo would otherwise pass right through, string comparisons being case-
+# and spelling-sensitive).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+MODEL_FILE="$SCRIPT_DIR/../../create-story/references/story-model.json"
+if [[ ! -f "$MODEL_FILE" ]]; then
+  echo "Story model not found at $MODEL_FILE — the plugin install looks incomplete." >&2
+  exit 1
+fi
+KNOWN_STATUSES=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print("\n".join(v["name"] for v in d["x-story-file"]["enums"]["status"]["values"]))' "$MODEL_FILE")
+if ! grep -qxF "$NEW_STATUS" <<< "$KNOWN_STATUSES"; then
+  echo "'$NEW_STATUS' isn't one of the canonical statuses:" >&2
+  echo "$KNOWN_STATUSES" | sed 's/^/  - /' >&2
+  echo "Use one of the above." >&2
+  # Exit 2, not the generic 1 every other failure in this script uses —
+  # this one specifically means "the caller asked for an invalid value,"
+  # not "something went wrong on this end" (a missing file, a stuck lock,
+  # a malformed story). A caller relaying this over HTTP (idle_server.py)
+  # uses this distinction to answer with a 400 instead of a 500 — the
+  # difference between a bad request and a server-side failure.
+  exit 2
+fi
+
+# Resolution is required when entering Done, and must be one of the canonical
+# values (same model, a different enum). Leaving Done needs no resolution and
+# clears the row (below). Passing --resolution for a non-Done target is a
+# caller error, not silently ignored.
+if [[ "$NEW_STATUS" == "Done" ]]; then
+  if [[ -z "$RESOLUTION" ]]; then
+    echo "Moving to 'Done' requires --resolution <value>." >&2
     exit 2
   fi
+  KNOWN_RESOLUTIONS=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print("\n".join(d["x-story-file"]["enums"]["resolution"]["values"]))' "$MODEL_FILE")
+  if ! grep -qxF "$RESOLUTION" <<< "$KNOWN_RESOLUTIONS"; then
+    echo "'$RESOLUTION' isn't one of the canonical resolutions:" >&2
+    echo "$KNOWN_RESOLUTIONS" | sed 's/^/  - /' >&2
+    exit 2
+  fi
+elif [[ -n "$RESOLUTION" ]]; then
+  echo "--resolution only applies when moving to 'Done'." >&2
+  exit 1
 fi
 
 if ! grep -q '^## History$' "$STORY_FILE"; then
@@ -97,8 +175,29 @@ HISTORY_LINE="- ${NOW_UTC} — Status: ${OLD_STATUS} → ${NEW_STATUS}"
 
 TMP_FILE=$(mktemp)
 
-awk -v new_status="$NEW_STATUS" -v today="$TODAY" -v history_line="$HISTORY_LINE" '
-  /^\| \*\*Status\*\* \|/ { print "| **Status** | " new_status " |"; next }
+# The values are passed through the environment, not awk -v: -v runs each
+# through awk's own escape processing, so a backslash in a note (e.g. a Windows
+# path) was silently turned into a newline/tab and split the metadata table.
+# ENVIRON values are opaque byte strings. The single-line check above already
+# keeps a raw newline out of the program text entirely. The exit status is
+# checked before the move so an awk failure can never overwrite the story with
+# the empty temp file.
+if ! NEW_STATUS="$NEW_STATUS" TODAY="$TODAY" HISTORY_LINE="$HISTORY_LINE" RESOLUTION="$RESOLUTION" NOTE="$NOTE" awk '
+  BEGIN {
+    new_status = ENVIRON["NEW_STATUS"]
+    today = ENVIRON["TODAY"]
+    history_line = ENVIRON["HISTORY_LINE"]
+    resolution = ENVIRON["RESOLUTION"]
+    note = ENVIRON["NOTE"]
+  }
+  /^\| \*\*Status\*\* \|/ {
+    print "| **Status** | " new_status " |"
+    print "| **Resolution** | " resolution " |"
+    print "| **Note** | " note " |"
+    next
+  }
+  /^\| \*\*Resolution\*\* \|/ { next }
+  /^\| \*\*Note\*\* \|/ { next }
   /^\| \*\*Updated\*\* \|/ { print "| **Updated** | " today " |"; next }
   /^## History$/ { print; in_history = 1; next }
   in_history && /^- / { print; saw_entry = 1; next }
@@ -109,9 +208,21 @@ awk -v new_status="$NEW_STATUS" -v today="$TODAY" -v history_line="$HISTORY_LINE
     next
   }
   { print }
-' "$STORY_FILE" > "$TMP_FILE"
+' "$STORY_FILE" > "$TMP_FILE"; then
+  rm -f "$TMP_FILE"
+  echo "Failed to rewrite $STORY_FILE — left unchanged." >&2
+  exit 1
+fi
 
-mv "$TMP_FILE" "$STORY_FILE"
+# The move is checked too: an unwritable target (e.g. an immutable story file)
+# would otherwise leave the story unchanged while the script still reported
+# success and printed the transition.
+if ! mv "$TMP_FILE" "$STORY_FILE"; then
+  rm -f "$TMP_FILE"
+  echo "Failed to write $STORY_FILE — left unchanged." >&2
+  exit 1
+fi
 
 echo "Status: ${OLD_STATUS} → ${NEW_STATUS}"
+[[ -n "$RESOLUTION" ]] && echo "Resolution: ${RESOLUTION}"
 echo "Appended: ${HISTORY_LINE}"

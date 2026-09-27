@@ -16,41 +16,31 @@
 # planner in the same pass, and setting planner or backlog removes it from
 # archive — a single write can't leave the file in an inconsistent state.
 #
-# The JSON here is nested (an archive entry is an object with code/
-# resolution/reason, not a bare string), unlike update-status.sh's flat
-# status list — grep/sed on that shape is fragile, so this shells out to
-# python3 for the read-modify-write. python3 is already a hard dependency
-# of this plugin (idle_server.py requires it), not a new one.
+# An archive entry is an object `{ "code": <code> }` and nothing else: a
+# story's Resolution and free-text Note belong to the story file itself
+# (written by update-status.sh on the Done transition), not to the board —
+# the board only records which zone a code sits in.
 #
-# Usage: set-board.sh <story-file> <backlog|planner|archive> [--resolution <Done|Won't Do>] [--reason <text>]
+# The JSON here is nested (archive entries are objects, not bare strings),
+# unlike update-status.sh's flat status list — grep/sed on that shape is
+# fragile, so this shells out to python3 for the read-modify-write. python3
+# is already a hard dependency of this plugin (idle_server.py requires it),
+# not a new one.
+#
+# Usage: set-board.sh <story-file> <backlog|planner|archive>
 # Prints the resulting zone.
 
 STORY_FILE="$1"
 ZONE="$2"
 shift 2 2>/dev/null
 
-RESOLUTION=""
-REASON=""
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --resolution)
-      if [[ $# -lt 2 ]]; then
-        echo "--resolution requires a value" >&2
-        exit 1
-      fi
-      RESOLUTION="$2"; shift 2 ;;
-    --reason)
-      if [[ $# -lt 2 ]]; then
-        echo "--reason requires a value" >&2
-        exit 1
-      fi
-      REASON="$2"; shift 2 ;;
-    *) echo "Unknown argument: $1" >&2; exit 1 ;;
-  esac
-done
-
 if [[ -z "$STORY_FILE" || -z "$ZONE" ]]; then
-  echo "Usage: set-board.sh <story-file> <backlog|planner|archive> [--resolution <Done|Won't Do>] [--reason <text>]" >&2
+  echo "Usage: set-board.sh <story-file> <backlog|planner|archive>" >&2
+  exit 1
+fi
+
+if [[ $# -gt 0 ]]; then
+  echo "Unknown argument: $1" >&2
   exit 1
 fi
 
@@ -59,18 +49,13 @@ if [[ ! -f "$STORY_FILE" ]]; then
   exit 1
 fi
 
-# Zone and resolution values are duplicated as literals in
+# Zone values are duplicated as literals in
 # open-backlog/scripts/idle_server.py (where they're validated a second
 # time, before this script is ever invoked) — no shared source of truth
 # across Python and bash, so keep both lists in sync by hand if either
 # ever changes.
 if [[ "$ZONE" != "backlog" && "$ZONE" != "planner" && "$ZONE" != "archive" ]]; then
   echo "'$ZONE' is not a valid zone — must be one of: backlog, planner, archive" >&2
-  exit 1
-fi
-
-if [[ "$ZONE" == "archive" && "$RESOLUTION" != "Done" && "$RESOLUTION" != "Won't Do" ]]; then
-  echo "Archiving requires --resolution 'Done' or \"Won't Do\", got: '$RESOLUTION'" >&2
   exit 1
 fi
 
@@ -94,13 +79,13 @@ BOARD_FILE="$(dirname "$STORY_FILE")/.backlog-board.json"
 # rather than wrapping it externally. The temp file is created next to
 # BOARD_FILE (not the system temp dir) so the final rename is guaranteed to
 # be on the same filesystem, and therefore atomic.
-if python3 - "$BOARD_FILE" "$CODE" "$ZONE" "$RESOLUTION" "$REASON" <<'PYEOF'
+if python3 - "$BOARD_FILE" "$CODE" "$ZONE" <<'PYEOF'
 import fcntl
 import json
 import os
 import sys
 
-board_file, code, zone, resolution, reason = sys.argv[1:6]
+board_file, code, zone = sys.argv[1:4]
 
 lock_fd = open(board_file + ".lock", "a+")
 fcntl.flock(lock_fd, fcntl.LOCK_EX)
@@ -127,7 +112,7 @@ try:
     if zone == "planner":
         board["planner"].append(code)
     elif zone == "archive":
-        board["archive"].append({"code": code, "resolution": resolution, "reason": reason})
+        board["archive"].append({"code": code})
     # zone == "backlog": already removed from both lists above, nothing to add
 
     tmp_file = board_file + ".tmp"

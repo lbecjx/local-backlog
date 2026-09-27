@@ -44,17 +44,6 @@ class Scratch:
         (self.backlog / ".backlog-config.json").write_text(
             json.dumps({"prefix": "QA", "lastCode": 0, "gitignored": True})
         )
-        (self.backlog / ".backlog-statuses.json").write_text(
-            json.dumps(
-                {
-                    "statuses": [
-                        {"name": "Not Started", "color": "gray"},
-                        {"name": "In Progress", "color": "blue"},
-                        {"name": "Done", "color": "green"},
-                    ]
-                }
-            )
-        )
         (self.backlog / ".backlog-board.json").write_text(json.dumps({"planner": [], "archive": []}))
 
         self.stage = tmp_path / "stage"
@@ -72,6 +61,8 @@ class Scratch:
 | **Type** | Task |
 | **Priority** | Low |
 | **Status** | {status} |
+| **Resolution** |  |
+| **Note** |  |
 | **Labels** | test |
 | **Created** | 2026-01-01 |
 | **Updated** | 2026-01-01 |
@@ -91,12 +82,15 @@ Test story.
         )
         return path
 
-    def status_of(self, code):
+    def field(self, code, label):
         text = (self.backlog / f"{code}-story.md").read_text()
         for line in text.splitlines():
-            if line.startswith("| **Status**"):
+            if line.startswith(f"| **{label}**"):
                 return line.split("|")[2].strip()
         return None
+
+    def status_of(self, code):
+        return self.field(code, "Status")
 
     def history_of(self, code):
         text = (self.backlog / f"{code}-story.md").read_text()

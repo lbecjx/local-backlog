@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/lbecjx/local-backlog/blob/main/skills/create-story/references/story-model.json",
+  "title": "local-backlog story model",
+  "description": "Single source of truth for the whole local-backlog data model: a story file's fields (types, required-when), the shape of its status-update log, AND the canonical enums those fields draw from — Status values (with their colors), the color palette, and Resolution values. Consumed by create-story (generate), update-status/set-board/idle_server (validate), open-backlog (serve to the viewer), and backlog-viewer (derive its Zod). Nothing about these types may be hand-duplicated outside this file.",
+  "type": "object",
+  "properties": {
+    "code": {
+      "type": "string",
+      "pattern": "^[A-Z]{2,6}-[0-9]{4}$"
+    },
+    "title": { "type": "string" },
+    "type": {
+      "type": "string",
+      "enum": ["Story", "Bug", "Task", "Spike"]
+    },
+    "priority": {
+      "type": "string",
+      "enum": ["High", "Medium", "Low"]
+    },
+    "status": {
+      "type": "string",
+      "enum": ["Not Started", "In Progress", "Done", "Blocked"],
+      "description": "One of the canonical Status values (see x-story-file.enums.status)."
+    },
+    "resolution": {
+      "type": "string",
+      "enum": ["Done", "Won't Do", "Duplicate", "Cannot Reproduce"],
+      "description": "Empty unless the story is Done. Invariant: Status = Done ⇔ Resolution set."
+    },
+    "note": {
+      "type": "string",
+      "description": "Optional free-text note for the current status — the SAME concept for any transition (into Done or otherwise). Empty when none."
+    },
+    "labels": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "created": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+    "updated": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+    "history": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/historyEntry" }
+    },
+    "body": { "type": "string" }
+  },
+  "required": ["code", "status", "created", "updated"],
+  "additionalProperties": false,
+
+  "$defs": {
+    "historyEntry": {
+      "title": "history entry",
+      "description": "One appended line of the story's status-update log. Append-only: past entries are never edited or removed.",
+      "type": "object",
+      "properties": {
+        "at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+          "description": "UTC, from a real clock."
+        },
+        "from": { "type": "string" },
+        "to": { "type": "string" },
+        "resolution": {
+          "type": "string",
+          "description": "Present when this entry is a transition into Done."
+        },
+        "note": {
+          "type": "string",
+          "description": "Optional free-text note for this transition (any status)."
+        }
+      },
+      "required": ["at", "from", "to"],
+      "additionalProperties": false
+    }
+  },
+
+  "x-story-file": {
+    "description": "How the model maps onto the story's Markdown file, and the canonical enums the fields draw from.",
+    "metadataTable": {
+      "header": ["Field", "Value"],
+      "rowFormat": "| **<label>** | <value> |",
+      "rows": [
+        { "key": "code", "label": "Code", "required": true },
+        { "key": "type", "label": "Type", "required": true, "default": "Story" },
+        { "key": "priority", "label": "Priority", "required": true, "default": "Medium" },
+        { "key": "status", "label": "Status", "required": true, "default": "Not Started" },
+        { "key": "resolution", "label": "Resolution", "required": false, "requiredWhen": "status is Done", "presentWhen": "always (empty until the first Done)" },
+        { "key": "note", "label": "Note", "required": false, "requiredWhen": null, "presentWhen": "always (empty when none)" },
+        { "key": "labels", "label": "Labels", "required": true },
+        { "key": "created", "label": "Created", "required": true },
+        { "key": "updated", "label": "Updated", "required": true }
+      ]
+    },
+    "historySection": {
+      "heading": "## History",
+      "line": "- <at> — Status: <from> → <to>[ · Resolution: <resolution>]"
+    },
+    "enums": {
+      "status": {
+        "canonical": true,
+        "description": "The canonical Status values and their color. No per-project status list — this is the single source.",
+        "values": [
+          { "name": "Not Started", "color": "neutral" },
+          { "name": "In Progress", "color": "blue" },
+          { "name": "Done", "color": "green" },
+          { "name": "Blocked", "color": "red" }
+        ]
+      },
+      "statusColor": {
+        "canonical": true,
+        "description": "The color-name palette a Status may reference (Tailwind classes per theme-aware badge/border).",
+        "palette": {
+          "neutral": { "badge": "bg-neutral-100 text-neutral-600 dark:bg-neutral-500/15 dark:text-neutral-300", "border": "border-l-neutral-400 dark:border-l-neutral-500" },
+          "blue": { "badge": "bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300", "border": "border-l-blue-500" },
+          "green": { "badge": "bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-300", "border": "border-l-green-500" },
+          "amber": { "badge": "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300", "border": "border-l-amber-500" },
+          "red": { "badge": "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300", "border": "border-l-red-500" },
+          "purple": { "badge": "bg-purple-100 text-purple-700 dark:bg-purple-500/15 dark:text-purple-300", "border": "border-l-purple-500" },
+          "teal": { "badge": "bg-teal-100 text-teal-700 dark:bg-teal-500/15 dark:text-teal-300", "border": "border-l-teal-500" },
+          "indigo": { "badge": "bg-indigo-100 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300", "border": "border-l-indigo-500" }
+        }
+      },
+      "resolution": {
+        "canonical": true,
+        "description": "The closed set of Resolution values, shared by local-backlog and backlog-viewer.",
+        "values": ["Done", "Won't Do", "Duplicate", "Cannot Reproduce"]
+      }
+    }
+  }
+}

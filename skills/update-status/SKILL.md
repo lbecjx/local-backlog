@@ -45,12 +45,12 @@ filename is a free-text slug. Ask if more than one file matches or none do.
 ### Step 2: Confirm the target status
 
 If the human said something like "mark it as done", map that to the story's
-actual convention. The project's known statuses live in
-`local-backlog/.backlog-config.json`'s `statuses` array — `"Not Started"`,
-`"In Progress"`, `"Done"` are the 3 defaults every project starts with, but a
-given project may have added more (e.g. `"Blocked"`). Prefer whatever's
-already listed there over inventing new wording. Show what's about to
-change:
+actual convention. The statuses are **canonical** — defined once in the story
+model (`skills/create-story/references/story-model.json`, under
+`x-story-file.enums.status`), shared by the plugin and the viewer:
+`"Not Started"`, `"In Progress"`, `"Done"`, `"Blocked"`. There is no
+per-project status list to edit. Prefer one of those over inventing new
+wording. Show what's about to change:
 
 ```
 [CODE]: Not Started → Done
@@ -60,38 +60,64 @@ For an unambiguous case (human explicitly named the story and the target
 status) this confirmation can be a statement rather than a question — don't
 turn an explicit instruction into an extra round-trip.
 
-### Step 3: Run the script
+### Step 3: If the target is Done, gather the resolution first
+
+`Done` also carries a *resolution*: which canonical outcome closed the story.
+The resolution values live in the same story model, under
+`x-story-file.enums.resolution` (`Done`, `Won't Do`, `Duplicate`,
+`Cannot Reproduce`). A move to `Done` **requires** one — the script refuses
+without it.
+
+When a human is in the loop, **they choose the resolution** — ask with the
+question tool, offering the canonical values, rather than guessing:
+
+1. Which resolution applies.
+2. An optional `note` — one short line of *why* (the resolution says *which*,
+   the note says *why*) — offering "skip" as a valid answer.
+
+Pass both to the script in Step 4. When running **unattended** (nobody to
+ask — e.g. an automated archive), pick the most fitting canonical resolution
+yourself and write a one-line `note` explaining the choice, so the decision
+isn't silent.
+
+Moving **out of** `Done` is the opposite: no resolution applies, so don't
+ask and don't pass one — the script clears the stored `Resolution` and `Note`
+rows.
+
+### Step 4: Run the script
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/skills/update-status/scripts/update-status.sh" <path-to-story-file> "<new-status>"
+bash "${CLAUDE_PLUGIN_ROOT}/skills/update-status/scripts/update-status.sh" <path-to-story-file> "<new-status>" [--resolution "<value>"] [--note "<text>"]
 ```
 
-This does all three writes together, from a real clock:
+This does all the writes together, from a real clock:
 - Updates the `| **Status** |` row
+- Sets the `| **Resolution** |` and `| **Note** |` rows — a value when moving
+  into `Done`, empty otherwise — inserting those rows after `Status` if the
+  story predates them
 - Updates the `| **Updated** |` row to the same date
 - Appends `- YYYY-MM-DDTHH:MM:SSZ — Status: <old> → <new>` to `## History`
 
-Never hand-edit these three spots separately — that's exactly the kind of
+Never hand-edit these spots separately — that's exactly the kind of
 multi-location update that drifts (a `Status` change without the matching
 `History` line, or vice versa). If the script reports "nothing to do" (the
 requested status matches the current one), relay that as-is — don't treat it
 as a failure.
 
-**If the script exits non-zero because the requested status isn't in the
-project's `.backlog-statuses.json`** (it prints the actual list of known
-statuses when this happens): don't silently pick the closest known one, and
-don't retry with a different value on your own. Show the human the list the
-script printed and ask which they meant — a genuine typo, or a real new
-status this project should adopt. For a genuine new status, add an entry to
-`.backlog-statuses.json`'s `statuses` array yourself, then re-run the script —
-don't ask the human to hand-edit JSON. `color` must be one of the names
-defined in `references/status-colors.json` (in this same skill folder) —
-read that file rather than guessing or reusing a name from memory; it's the
-same file `/local-backlog:open-backlog`'s viewer reads at runtime, so a name
-not in it renders as an unstyled "unknown" status instead of the intended
-color.
+**If the script exits non-zero because a value isn't canonical** — the
+requested status, or the resolution when moving to `Done` (it prints the
+actual list in both cases): don't silently pick the closest one, and don't
+retry with a different value on your own. Show the human the list the script
+printed and ask which they meant. Both lists are **canonical** — defined once
+in the story model (`skills/create-story/references/story-model.json`, under
+`x-story-file.enums.status` and `x-story-file.enums.resolution`), shared by
+the plugin and the viewer; there is no per-project list to edit.
 
-### Step 4: Report
+A move to `Done` with **no** resolution at all is the same kind of error
+(exit 2): ask the human which resolution applies (Step 3) and re-run with
+it — never pass a placeholder to get past the check.
+
+### Step 5: Report
 
 Relay the script's own output — it already states the old/new status and the
 exact line it appended. Don't paraphrase the timestamp into your own summary:
@@ -101,8 +127,12 @@ stale or wrong.
 
 ## Principles
 
-- **One script, one atomic update** — `Status`, `Updated`, and `History` change
-  together or not at all; never edit just one of the three by hand.
+- **One script, one atomic update** — `Status`, `Resolution`, `Note`,
+  `Updated`, and `History` change together or not at all; never edit just some
+  of them by hand.
+- **Resolution is the human's call** — for a move to `Done`, the human picks
+  which canonical resolution applies; choose it yourself only when
+  unattended, and write a `note` so the choice isn't silent.
 - **Real clock, not a guess** — the timestamp always comes from `date -u`
   inside the script, never typed or estimated.
 - **History is append-only** — past entries are never edited or removed, even
