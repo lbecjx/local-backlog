@@ -176,8 +176,12 @@ Use `references/template.md`. Then report:
 ✅ NB-0001 created — local-backlog/NB-0001-syntax-highlighting-codeblock.md
    Add syntax highlighting to CodeBlock with Shiki.
 
-   To work on it: /workflow-dev:init local-backlog/NB-0001-syntax-highlighting-codeblock.md
+   Ready to build it? /workflow-dev:init local-backlog/NB-0001-syntax-highlighting-codeblock.md
 ```
+
+If `workflow-dev` isn't present in the session, the closing note instead names
+it with a link (a discovery nudge for projects using only `local-backlog` — not a
+dependency).
 
 ## Batch creation
 

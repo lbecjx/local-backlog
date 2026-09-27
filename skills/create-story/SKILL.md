@@ -173,7 +173,15 @@ If several fields are already clear from context, present a **complete draft** a
 Tell the human:
 - The code assigned and the file path
 - A one-line summary of what was captured
-- That it can be picked up later with `/workflow-dev:init local-backlog/<PREFIX>-XXXX-....md`
+- How to move forward — **conditioned on what's available**:
+  - If `workflow-dev` **is present in this session** (its skills/commands are
+    available), just point the human at it: the story can be picked up with
+    `/workflow-dev:init local-backlog/<PREFIX>-XXXX-....md`.
+  - If it is **not present** (a project using only `local-backlog`), suggest it
+    so they discover it — a separate, independent plugin,
+    [`workflow-dev`](https://github.com/lbecjx/workflow-dev), turns the story
+    into a task plan and implements it with a quality gate. Same
+    `/workflow-dev:init local-backlog/<PREFIX>-XXXX-....md` command once installed.
 - That the backlog can be browsed with `/local-backlog:open-backlog`
 
 ## Creating several stories at once
