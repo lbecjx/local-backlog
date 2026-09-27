@@ -92,7 +92,9 @@ the parts still missing, with **"Yes" as the default** (list it first):
 Apply each accepted part with its own script — never silently:
 
 - **(a)** is the normal status change: make `In Progress` the target status and
-  let Step 5 write it once (don't run the script twice).
+  let Step 5 write it once (don't run the script twice). If (a) is **declined**,
+  the target stays the story's current status — Step 5 must not write `In
+  Progress` in that case. A declined status change is never applied.
 - **(b)** is a **zone-only** write that must **not** touch `Status`:
   `bash "${CLAUDE_PLUGIN_ROOT}/skills/update-status/scripts/set-board.sh" <path-to-story-file> planner`.
 

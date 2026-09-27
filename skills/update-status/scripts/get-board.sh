@@ -71,10 +71,14 @@ archive = board.get("archive")
 planner = planner if isinstance(planner, list) else []
 archive = archive if isinstance(archive, list) else []
 
-if code in planner:
-    zone = "planner"
-elif any(isinstance(entry, dict) and entry.get("code") == code for entry in archive):
+# Archive is checked first: if a code somehow appears in both lists, archive
+# wins — the same precedence the viewer resolves with, and the same invariant
+# set-board.sh maintains (it strips a code from both lists before re-adding it,
+# so overlap can only come from an externally-edited board).
+if any(isinstance(entry, dict) and entry.get("code") == code for entry in archive):
     zone = "archive"
+elif code in planner:
+    zone = "planner"
 else:
     zone = "backlog"
 

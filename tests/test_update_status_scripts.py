@@ -65,6 +65,19 @@ def test_reports_backlog_when_in_neither_list(tmp_path):
     assert result.stdout.strip() == "backlog"
 
 
+def test_archive_wins_when_a_code_is_in_both_lists(tmp_path):
+    # Overlap can only come from an externally-edited board; the viewer resolves
+    # it archive-first, so the reader must agree (otherwise the skill's
+    # "don't touch an archived story" guard would miss it).
+    backlog = tmp_path / "local-backlog"
+    backlog.mkdir()
+    story = write_story(backlog, "GB-0001")
+    write_board(backlog, planner=["GB-0001"], archive=["GB-0001"])
+    result = get_board(story)
+    assert result.returncode == 0
+    assert result.stdout.strip() == "archive"
+
+
 def test_missing_board_file_is_backlog(tmp_path):
     backlog = tmp_path / "local-backlog"
     backlog.mkdir()
