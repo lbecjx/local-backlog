@@ -14,6 +14,16 @@ All notable changes to this plugin are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/), versioning follows
 [Semantic Versioning](https://semver.org/).
 
+## 1.6.0
+
+- `/local-backlog:update-status` now offers to set a story `In Progress` and add
+  it to the Planner board in one prompt when you start working on it, so the
+  board no longer drifts behind the status. It reads the story's current board
+  zone first and only asks when there is something to do — never for a story
+  already `In Progress` on the Planner board, never for one in the Archive, and
+  never when you're closing a story. Each accepted part goes through its own
+  script, and nothing is applied silently.
+
 ## 1.5.0
 
 - `/local-backlog:fix` now detects stories that reached `Done` before the
