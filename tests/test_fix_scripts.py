@@ -64,6 +64,22 @@ def test_lists_only_done_stories_without_a_resolution(tmp_path):
     assert list_unresolved(backlog) == [str(unresolved)]
 
 
+def test_lists_a_legacy_story_with_no_resolution_row(tmp_path):
+    # A story created before the Resolution field existed has no such row at
+    # all — it must still be detected (the row read treats absent as empty).
+    backlog = tmp_path / "local-backlog"
+    backlog.mkdir()
+    legacy = backlog / "FX-0004-story.md"
+    legacy.write_text(
+        "# FX-0004 · test story\n\n| Field | Value |\n|---|---|\n"
+        "| **Code** | FX-0004 |\n| **Type** | Story |\n| **Priority** | Low |\n"
+        "| **Status** | Done |\n| **Labels** | test |\n"
+        "| **Created** | 2026-01-01 |\n| **Updated** | 2026-01-01 |\n\n---\n\n"
+        "## History\n\n- 2026-01-01T00:00:00Z — Created\n\n---\n"
+    )
+    assert list_unresolved(backlog) == [str(legacy)]
+
+
 def test_backfill_touches_only_the_unresolved_done_story(tmp_path):
     backlog = tmp_path / "local-backlog"
     backlog.mkdir()

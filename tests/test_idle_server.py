@@ -205,12 +205,15 @@ class TestBoardEndpointZoneTransitions:
         assert status == 200
         assert scratch.field("QA-0001", "Resolution") == "Duplicate"
 
-    def test_archiving_an_already_done_story_is_a_status_noop(self, server):
+    def test_archiving_an_already_done_story_backfills_its_resolution(self, server):
+        # The story is already Done but has no resolution (legacy shape): the
+        # archive's Done write fills the row without changing the status.
         base_url, scratch = server
         scratch.write_story("QA-0001", "Done")
         status, body = post(base_url, "/api/board", {"code": "QA-0001", "zone": "archive", "resolution": "Done"})
         assert status == 200
         assert scratch.status_of("QA-0001") == "Done"
+        assert scratch.field("QA-0001", "Resolution") == "Done"
 
     def test_planner_to_backlog(self, server):
         base_url, scratch = server
@@ -548,3 +551,29 @@ class TestUpdateStatusResolution:
         r = self._run(str(story), "Done")
         assert r.returncode == 0
         assert story.read_text() == before
+
+    def test_backfill_preserves_an_existing_note(self, tmp_path):
+        story = self._story(tmp_path, status="Done", resolution="", note="kept")
+        r = self._run(str(story), "Done", "--resolution", "Done")
+        assert r.returncode == 0
+        text = story.read_text()
+        assert "| **Resolution** | Done |" in text
+        assert "| **Note** | kept |" in text
+
+    def test_backfill_a_legacy_story_without_resolution_rows(self, tmp_path):
+        # The real legacy shape: the story predates the Resolution/Note rows
+        # entirely. The write inserts them (filled) rather than failing.
+        backlog = tmp_path / "local-backlog"
+        backlog.mkdir()
+        story = backlog / "LG-0001-story.md"
+        story.write_text(
+            "# LG-0001 · x\n\n| Field | Value |\n|---|---|\n"
+            "| **Code** | LG-0001 |\n| **Status** | Done |\n"
+            "| **Updated** | 2026-01-01 |\n\n---\n\n"
+            "## History\n\n- 2026-01-01T00:00:00Z — Created\n\n---\n"
+        )
+        r = self._run(str(story), "Done", "--resolution", "Done")
+        assert r.returncode == 0
+        text = story.read_text()
+        assert "| **Resolution** | Done |" in text
+        assert "| **Note** |  |" in text

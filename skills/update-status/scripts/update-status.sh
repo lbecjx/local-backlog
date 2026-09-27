@@ -150,7 +150,10 @@ if [[ ! -f "$MODEL_FILE" ]]; then
   exit 1
 fi
 KNOWN_STATUSES=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print("\n".join(v["name"] for v in d["x-story-file"]["enums"]["status"]["values"]))' "$MODEL_FILE")
-if ! grep -qxF "$NEW_STATUS" <<< "$KNOWN_STATUSES"; then
+# `--` ends grep's option parsing: without it a value shaped like an option
+# (`--version`, `-eDone`) is taken as a flag, grep exits 0, and the value slips
+# through the canonical-set gate below.
+if ! grep -qxF -- "$NEW_STATUS" <<< "$KNOWN_STATUSES"; then
   echo "'$NEW_STATUS' isn't one of the canonical statuses:" >&2
   echo "$KNOWN_STATUSES" | sed 's/^/  - /' >&2
   echo "Use one of the above." >&2
@@ -173,7 +176,7 @@ if [[ "$NEW_STATUS" == "Done" ]]; then
     exit 2
   fi
   KNOWN_RESOLUTIONS=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print("\n".join(d["x-story-file"]["enums"]["resolution"]["values"]))' "$MODEL_FILE")
-  if ! grep -qxF "$RESOLUTION" <<< "$KNOWN_RESOLUTIONS"; then
+  if ! grep -qxF -- "$RESOLUTION" <<< "$KNOWN_RESOLUTIONS"; then
     echo "'$RESOLUTION' isn't one of the canonical resolutions:" >&2
     echo "$KNOWN_RESOLUTIONS" | sed 's/^/  - /' >&2
     exit 2
