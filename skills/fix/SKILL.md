@@ -101,12 +101,20 @@ Don't start guessing before you know what "broken" means here.
    `index.html` from a discontinued generator).
 6. **Do the story files use the current metadata schema?** The table must
    read `| Field | Value |` with rows `Code / Type / Priority / Status /
-   Labels / Created / Updated` (see `create-story/references/template.md` for
-   the authoritative current shape). Grep for the table header row across
-   `local-backlog/*.md` — any file whose table doesn't match (legacy Spanish keys
-   like `Campo/Valor`, `Estado`, `Código`, or any other drift) is why the
-   viewer shows "Unknown" or blank fields for it: the parser reads the
-   current English keys only, nothing else.
+   Resolution / Note / Labels / Created / Updated` (see
+   `create-story/references/template.md` for the authoritative current shape —
+   `Resolution` and `Note` are always present, empty until the story first
+   reaches `Done`). Grep for the table header row across `local-backlog/*.md` —
+   any file whose table doesn't match (legacy Spanish keys like
+   `Campo/Valor`, `Estado`, `Código`, or any other drift) is why the viewer
+   shows "Unknown" or blank fields for it: the parser reads the current English
+   keys only, nothing else.
+7. **Is any `Done` story missing its resolution?** (legacy data) A story that
+   reached `Done` before the `Resolution` field existed is `Done` with an empty
+   `Resolution` row — it violates the invariant `Status: Done ⇒ Resolution set`
+   that `/local-backlog:update-status` enforces on the Done transition. Run
+   `scripts/list-unresolved-done.sh <local-backlog-dir>`; every path it prints
+   is such a story. Repair in Step 3.
 
 ### Step 3: Handle each finding
 
@@ -119,6 +127,16 @@ Don't start guessing before you know what "broken" means here.
   key), use `/local-backlog:update-status`'s script instead of editing the
   `Status` row directly — it keeps `Updated` and `## History` in sync in the
   same pass, which a manual edit here would otherwise skip.
+- **`Done` story with no resolution (legacy)** → show the exact list from
+  `list-unresolved-done.sh` and offer to set `resolution: Done` on each; the
+  default is `Done` (a legacy Done story was finished, not declined). Apply
+  only after confirmation, per story, through the update mechanism — never a
+  hand-edit of the row:
+  `bash "${CLAUDE_PLUGIN_ROOT}/skills/update-status/scripts/update-status.sh" <file> Done --resolution Done`.
+  That fills the empty row without rewriting `Status` or adding a `History`
+  line, since no status transition happens. Never touch a non-`Done` story;
+  never overwrite a story that already has a resolution. Re-running finds
+  nothing once every `Done` story is resolved (idempotent).
 - **Ambiguous** (a status value that isn't a known state and isn't clearly a
   deliberate custom one either, a field that doesn't map cleanly to the
   current schema, anything you'd have to guess at) → ask the human what they

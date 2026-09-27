@@ -205,12 +205,15 @@ class TestBoardEndpointZoneTransitions:
         assert status == 200
         assert scratch.field("QA-0001", "Resolution") == "Duplicate"
 
-    def test_archiving_an_already_done_story_is_a_status_noop(self, server):
+    def test_archiving_an_already_done_story_backfills_its_resolution(self, server):
+        # The story is already Done but has no resolution (legacy shape): the
+        # archive's Done write fills the row without changing the status.
         base_url, scratch = server
         scratch.write_story("QA-0001", "Done")
         status, body = post(base_url, "/api/board", {"code": "QA-0001", "zone": "archive", "resolution": "Done"})
         assert status == 200
         assert scratch.status_of("QA-0001") == "Done"
+        assert scratch.field("QA-0001", "Resolution") == "Done"
 
     def test_planner_to_backlog(self, server):
         base_url, scratch = server
@@ -518,3 +521,59 @@ class TestUpdateStatusResolution:
         finally:
             subprocess.run(["chflags", "nouchg", str(story)], check=True)
         assert story.read_text() == before
+
+    def test_backfill_fills_an_empty_resolution_without_a_history_line(self, tmp_path):
+        # A legacy `Status: Done` story (predating the Resolution field): asking
+        # for it with a resolution fills the row — the Status does not change and
+        # no History line is invented for a transition that never happened.
+        story = self._story(tmp_path, status="Done", resolution="")
+        before_history = [line for line in story.read_text().splitlines() if line.startswith("- ")]
+        r = self._run(str(story), "Done", "--resolution", "Done")
+        assert r.returncode == 0
+        text = story.read_text()
+        assert "| **Status** | Done |" in text
+        assert "| **Resolution** | Done |" in text
+        assert [line for line in text.splitlines() if line.startswith("- ")] == before_history
+
+    def test_backfill_is_idempotent_and_never_overwrites_a_resolution(self, tmp_path):
+        story = self._story(tmp_path, status="Done", resolution="")
+        assert self._run(str(story), "Done", "--resolution", "Done").returncode == 0
+        after = story.read_text()
+        # Re-running, or asking for a different resolution once one is set,
+        # changes nothing.
+        assert self._run(str(story), "Done", "--resolution", "Done").returncode == 0
+        assert self._run(str(story), "Done", "--resolution", "Won't Do").returncode == 0
+        assert story.read_text() == after
+
+    def test_done_without_resolution_and_no_flag_is_still_a_noop(self, tmp_path):
+        story = self._story(tmp_path, status="Done", resolution="")
+        before = story.read_text()
+        r = self._run(str(story), "Done")
+        assert r.returncode == 0
+        assert story.read_text() == before
+
+    def test_backfill_preserves_an_existing_note(self, tmp_path):
+        story = self._story(tmp_path, status="Done", resolution="", note="kept")
+        r = self._run(str(story), "Done", "--resolution", "Done")
+        assert r.returncode == 0
+        text = story.read_text()
+        assert "| **Resolution** | Done |" in text
+        assert "| **Note** | kept |" in text
+
+    def test_backfill_a_legacy_story_without_resolution_rows(self, tmp_path):
+        # The real legacy shape: the story predates the Resolution/Note rows
+        # entirely. The write inserts them (filled) rather than failing.
+        backlog = tmp_path / "local-backlog"
+        backlog.mkdir()
+        story = backlog / "LG-0001-story.md"
+        story.write_text(
+            "# LG-0001 · x\n\n| Field | Value |\n|---|---|\n"
+            "| **Code** | LG-0001 |\n| **Status** | Done |\n"
+            "| **Updated** | 2026-01-01 |\n\n---\n\n"
+            "## History\n\n- 2026-01-01T00:00:00Z — Created\n\n---\n"
+        )
+        r = self._run(str(story), "Done", "--resolution", "Done")
+        assert r.returncode == 0
+        text = story.read_text()
+        assert "| **Resolution** | Done |" in text
+        assert "| **Note** |  |" in text
