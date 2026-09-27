@@ -61,6 +61,8 @@ class Scratch:
 | **Type** | Task |
 | **Priority** | Low |
 | **Status** | {status} |
+| **Resolution** |  |
+| **Note** |  |
 | **Labels** | test |
 | **Created** | 2026-01-01 |
 | **Updated** | 2026-01-01 |
@@ -80,12 +82,15 @@ Test story.
         )
         return path
 
-    def status_of(self, code):
+    def field(self, code, label):
         text = (self.backlog / f"{code}-story.md").read_text()
         for line in text.splitlines():
-            if line.startswith("| **Status**"):
+            if line.startswith(f"| **{label}**"):
                 return line.split("|")[2].strip()
         return None
+
+    def status_of(self, code):
+        return self.field(code, "Status")
 
     def history_of(self, code):
         text = (self.backlog / f"{code}-story.md").read_text()

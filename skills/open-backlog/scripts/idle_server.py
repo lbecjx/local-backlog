@@ -42,12 +42,12 @@ SET_BOARD_SCRIPT = os.path.join(SCRIPT_DIR, "..", "..", "update-status", "script
 # by hand if the <PREFIX>-XXXX format ever changes.
 CODE_PATTERN = re.compile(r"^[A-Z]{2,6}-[0-9]{4}$")
 
-# Zone and resolution values, duplicated as literals in
-# update-status/scripts/set-board.sh (which validates them again on its
-# own side, independent of this server) — same "keep in sync by hand" note
-# as CODE_PATTERN above.
+# Zone values, duplicated as literals in update-status/scripts/set-board.sh
+# (which validates them again on its own side, independent of this server) —
+# same "keep in sync by hand" note as CODE_PATTERN above. Resolution values
+# are NOT duplicated here: they are read from the canonical story model (see
+# _known_resolutions below), so there is no second list to keep in sync.
 VALID_ZONES = ("backlog", "planner", "archive")
-VALID_RESOLUTIONS = ("Done", "Won't Do")
 
 last_activity = time.time()
 activity_lock = threading.Lock()
@@ -115,18 +115,37 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             pass
         return None
 
-    def _known_statuses(self, story_file):
-        # The canonical Status values live in the story model (the single
-        # source), not in a per-project file. Return the set of valid names.
-        # (None on an unreadable model means "no closed list" — permissive,
-        # matching the old backward-compat rule rather than failing hard.)
+    def _load_model(self):
+        # The canonical Status and Resolution values live in the story model
+        # (the single source), not in a per-project file. None on an
+        # unreadable model means "no closed list" — permissive, matching the
+        # old backward-compat rule rather than failing hard.
         model_file = os.path.join(SCRIPT_DIR, "..", "..", "create-story", "references", "story-model.json")
         try:
             with open(model_file) as f:
-                model = json.load(f)
-            return {entry["name"] for entry in model["x-story-file"]["enums"]["status"]["values"]}
-        except (OSError, json.JSONDecodeError, KeyError, TypeError):
+                return json.load(f)
+        except (OSError, json.JSONDecodeError):
             return None
+
+    def _known_statuses(self):
+        try:
+            return {entry["name"] for entry in self._load_model()["x-story-file"]["enums"]["status"]["values"]}
+        except (KeyError, TypeError):
+            return None
+
+    def _known_resolutions(self):
+        try:
+            return list(self._load_model()["x-story-file"]["enums"]["resolution"]["values"])
+        except (KeyError, TypeError):
+            return None
+
+    def _resolution_error(self, known_resolutions):
+        # The 400 body both /api/status (a Done target) and /api/board
+        # (archive) return when the resolution is missing or outside the
+        # canonical set.
+        if known_resolutions is None:
+            return "'resolution' is required and must be a canonical value"
+        return f"'resolution' is required and must be one of: {', '.join(sorted(known_resolutions))}"
 
     def _from_this_server(self):
         # This server was read-only until this task group — no other page
@@ -152,7 +171,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             # this request's handler thread.
             return False
 
-    def _handle_archive(self, story_file, board_args, resolution):
+    def _handle_archive(self, story_file, board_args, resolution, note):
         # AC #9: archiving a story that isn't already Done must set its
         # Status to Done. update-status.sh already no-ops cleanly ("Status
         # is already 'Done' — nothing to do.") when it's called with the
@@ -175,7 +194,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         # ever recorded in Archive and no way back except a hand edit.
         # Refusing up front, before touching anything, keeps the closed list
         # an actual guarantee instead of one with a rollback-shaped hole.
-        known_statuses = self._known_statuses(story_file)
+        known_statuses = self._known_statuses()
         if old_status is not None and known_statuses is not None and old_status not in known_statuses:
             self._send_json(
                 409,
@@ -186,11 +205,13 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             )
             return
 
-        status_result = subprocess.run(
-            [UPDATE_STATUS_SCRIPT, story_file, "Done", "--resolution", resolution],
-            capture_output=True,
-            text=True,
-        )
+        # The resolution (and any free-text note) belong to the story — they
+        # go through update-status.sh into its Resolution/Note rows; the board
+        # write below carries only the code.
+        status_args = [UPDATE_STATUS_SCRIPT, story_file, "Done", "--resolution", resolution]
+        if note:
+            status_args += ["--note", note]
+        status_result = subprocess.run(status_args, capture_output=True, text=True)
         if status_result.returncode != 0:
             # Exit code 2 means update-status.sh rejected "Done" itself as
             # not one of the canonical statuses (a model that dropped it) — a
@@ -305,7 +326,31 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             if not isinstance(status, str) or not status:
                 self._send_json(400, {"error": "missing 'status'"})
                 return
+            resolution = payload.get("resolution")
+            if resolution is not None and not isinstance(resolution, str):
+                self._send_json(400, {"error": "'resolution' must be a string"})
+                return
+            # Resolution belongs to the Done transition alone: required for a
+            # Done target, rejected for any other. Checked against the canonical
+            # model here so an unlisted value is a clean 400; update-status.sh
+            # re-checks it authoritatively before writing.
+            known_resolutions = self._known_resolutions()
+            if status == "Done":
+                if not resolution or (known_resolutions is not None and resolution not in known_resolutions):
+                    self._send_json(400, {"error": self._resolution_error(known_resolutions)})
+                    return
+            elif resolution:
+                self._send_json(400, {"error": "'resolution' only applies to a 'Done' transition"})
+                return
+            note = payload.get("note")
+            if note is not None and not isinstance(note, str):
+                self._send_json(400, {"error": "'note' must be a string"})
+                return
             args = [UPDATE_STATUS_SCRIPT, story_file, status]
+            if resolution:
+                args += ["--resolution", resolution]
+            if note:
+                args += ["--note", note]
         else:  # self.path == "/api/board" — the only other value possible after the check above
             zone = payload.get("zone", "")
             if zone not in VALID_ZONES:
@@ -320,23 +365,32 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             if resolution is not None and not isinstance(resolution, str):
                 self._send_json(400, {"error": "'resolution' must be a string"})
                 return
-            if zone == "archive" and resolution not in VALID_RESOLUTIONS:
-                self._send_json(
-                    400, {"error": f"archiving requires 'resolution' to be one of: {', '.join(VALID_RESOLUTIONS)}"}
-                )
+            # The board no longer carries a resolution: archiving is a Done
+            # transition, so the resolution goes to the story via
+            # update-status.sh (inside _handle_archive). It is required here,
+            # and validated against the canonical model, so a missing or
+            # unlisted one is a clean 400 before anything is touched.
+            known_resolutions = self._known_resolutions()
+            if zone == "archive":
+                if not resolution or (known_resolutions is not None and resolution not in known_resolutions):
+                    self._send_json(400, {"error": self._resolution_error(known_resolutions)})
+                    return
+            elif resolution:
+                self._send_json(400, {"error": "'resolution' only applies when archiving"})
                 return
-            reason = payload.get("reason")
-            if reason is not None and not isinstance(reason, str):
-                self._send_json(400, {"error": "'reason' must be a string"})
+            # 'reason' is the free-text the current viewer sends with an
+            # archive; it maps to the story's Note. 'note' is the canonical
+            # name and wins when both are present.
+            note = payload.get("note")
+            if note is None:
+                note = payload.get("reason")
+            if note is not None and not isinstance(note, str):
+                self._send_json(400, {"error": "'note'/'reason' must be a string"})
                 return
             board_args = [SET_BOARD_SCRIPT, story_file, zone]
-            if resolution is not None:
-                board_args += ["--resolution", resolution]
-            if reason:
-                board_args += ["--reason", reason]
 
             if zone == "archive":
-                self._handle_archive(story_file, board_args, resolution)
+                self._handle_archive(story_file, board_args, resolution, note)
                 return
 
             args = board_args

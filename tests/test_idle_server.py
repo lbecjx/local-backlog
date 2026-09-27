@@ -73,6 +73,54 @@ class TestStatusEndpoint:
         status, body = post(base_url, "/api/status", {"code": "QA-0001", "status": 123})
         assert status == 400
 
+    def test_status_to_done_requires_a_resolution(self, server):
+        base_url, scratch = server
+        scratch.write_story("QA-0001", "In Progress")
+        status, body = post(base_url, "/api/status", {"code": "QA-0001", "status": "Done"})
+        assert status == 400
+        assert scratch.status_of("QA-0001") == "In Progress"  # untouched
+
+    def test_status_to_done_with_valid_resolution_and_note_writes_rows(self, server):
+        base_url, scratch = server
+        scratch.write_story("QA-0001", "In Progress")
+        status, body = post(
+            base_url, "/api/status", {"code": "QA-0001", "status": "Done", "resolution": "Done", "note": "shipped"}
+        )
+        assert status == 200
+        assert scratch.status_of("QA-0001") == "Done"
+        assert scratch.field("QA-0001", "Resolution") == "Done"
+        assert scratch.field("QA-0001", "Note") == "shipped"
+
+    def test_status_to_done_with_custom_resolution_is_400(self, server):
+        base_url, scratch = server
+        scratch.write_story("QA-0001", "In Progress")
+        status, body = post(base_url, "/api/status", {"code": "QA-0001", "status": "Done", "resolution": "Maybe"})
+        assert status == 400
+        assert scratch.status_of("QA-0001") == "In Progress"  # untouched
+
+    def test_resolution_on_a_non_done_target_is_400(self, server):
+        base_url, scratch = server
+        scratch.write_story("QA-0001", "Not Started")
+        status, body = post(
+            base_url, "/api/status", {"code": "QA-0001", "status": "In Progress", "resolution": "Done"}
+        )
+        assert status == 400
+        assert scratch.status_of("QA-0001") == "Not Started"  # untouched
+
+    def test_note_is_recorded_on_a_non_done_transition(self, server):
+        base_url, scratch = server
+        scratch.write_story("QA-0001", "Not Started")
+        status, body = post(base_url, "/api/status", {"code": "QA-0001", "status": "In Progress", "note": "starting"})
+        assert status == 200
+        assert scratch.status_of("QA-0001") == "In Progress"
+        assert scratch.field("QA-0001", "Note") == "starting"
+
+    def test_non_string_note_returns_clean_400(self, server):
+        base_url, scratch = server
+        scratch.write_story("QA-0001", "Not Started")
+        status, body = post(base_url, "/api/status", {"code": "QA-0001", "status": "In Progress", "note": 123})
+        assert status == 400
+
 
 class TestBoardEndpointZoneTransitions:
     def test_move_to_planner(self, server):
@@ -95,9 +143,9 @@ class TestBoardEndpointZoneTransitions:
         assert status == 200
         assert scratch.status_of("QA-0001") == "Done"
         archive = scratch.board()["archive"]
-        assert archive == [{"code": "QA-0001", "resolution": "Done", "reason": ""}]
+        assert archive == [{"code": "QA-0001"}]
 
-    def test_archive_with_wont_do_and_reason(self, server):
+    def test_archive_with_wont_do_maps_reason_to_story_note(self, server):
         base_url, scratch = server
         scratch.write_story("QA-0001", "In Progress")
         status, body = post(
@@ -107,9 +155,23 @@ class TestBoardEndpointZoneTransitions:
         )
         assert status == 200
         assert scratch.status_of("QA-0001") == "Done"
-        entry = scratch.board()["archive"][0]
-        assert entry["resolution"] == "Won't Do"
-        assert entry["reason"] == "deprioritized"
+        # The board carries only the code; the resolution and the free-text
+        # (the viewer's 'reason') belong to the story itself.
+        assert scratch.board()["archive"] == [{"code": "QA-0001"}]
+        assert scratch.field("QA-0001", "Resolution") == "Won't Do"
+        assert scratch.field("QA-0001", "Note") == "deprioritized"
+
+    def test_archive_accepts_every_canonical_resolution(self, server):
+        # AC #14: the resolution is validated against the story model, not the
+        # old hardcoded ("Done", "Won't Do") tuple, so the rest of the
+        # canonical set is accepted too.
+        base_url, scratch = server
+        scratch.write_story("QA-0001", "Not Started")
+        status, body = post(
+            base_url, "/api/board", {"code": "QA-0001", "zone": "archive", "resolution": "Duplicate"}
+        )
+        assert status == 200
+        assert scratch.field("QA-0001", "Resolution") == "Duplicate"
 
     def test_archiving_an_already_done_story_is_a_status_noop(self, server):
         base_url, scratch = server
