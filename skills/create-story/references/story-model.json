@@ -93,7 +93,8 @@
     },
     "historySection": {
       "heading": "## History",
-      "line": "- <at> — Status: <from> → <to>[ · Resolution: <resolution>][ · Note: <note>]"
+      "line": "- <at> — Status: <from> → <to>[ · Resolution: <resolution>][ · Note: <note>]",
+      "description": "Reading an entry: the segments are ORDERED and Note is terminal, but a note is free text and may itself contain ` · ` (only newline, CR and `|` are refused, because the note also lands in a table cell). So take everything after the FIRST ` · Note: ` as the note, and look for ` · Resolution: ` only in the part BEFORE it — never split on the last occurrence, and never search for a marker across the whole line. A ` · Resolution: ` that appears inside a note's own text is part of that note, not a segment."
     },
     "enums": {
       "status": {
