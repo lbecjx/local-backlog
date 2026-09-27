@@ -14,6 +14,12 @@ All notable changes to this plugin are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/), versioning follows
 [Semantic Versioning](https://semver.org/).
 
+## 1.3.2
+
+- Rebuilt and re-vendored the bundled viewer so it carries the client-side load
+  resilience: a dropped story fetch is retried, and a single unrecoverable story
+  no longer fails the whole load.
+
 ## 1.3.1
 
 - The viewer's server now uses a larger accept backlog, so the burst of
