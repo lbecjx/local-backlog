@@ -39,14 +39,14 @@ cp -R "$DIST_DIR/." "$STAGE/"
 # detail, independent of what the project's own folder is called.
 ln -sfn "$REPO_ROOT/local-backlog" "$STAGE/backlog"
 
-# The authoritative status/color palette — the same file
-# update-status.sh and its SKILL.md reference by path — served at the app's
-# own root (not inside local-backlog/, which is per-project data) so the viewer's
-# runtime fetch('/status-colors.json') resolves to this exact file. Copied
-# after dist/, deliberately overwriting any placeholder that ships inside
+# The authoritative data model (a story's fields + the canonical
+# statuses/colors/resolutions) — the single source — served at the app's own
+# root (not inside local-backlog/, which is per-project data) so the viewer's
+# runtime fetch('/story-model.json') resolves to this exact file. Copied after
+# dist/, deliberately overwriting any placeholder that ships inside
 # backlog-viewer's own build output (used only for that project's isolated
 # dev/test runs, never meant to reach a real project through this script).
-cp "$SCRIPT_DIR/../../update-status/references/status-colors.json" "$STAGE/status-colors.json"
+cp "$SCRIPT_DIR/../../create-story/references/story-model.json" "$STAGE/story-model.json"
 
 PORT=""
 if [ -f "$STAGE/.viewer.pid" ]; then

@@ -39,9 +39,9 @@ class TestStatusEndpoint:
     def test_unrecognized_status_is_400_not_500(self, server):
         base_url, scratch = server
         scratch.write_story("QA-0001", "Not Started")
-        status, body = post(base_url, "/api/status", {"code": "QA-0001", "status": "Blocked"})
+        status, body = post(base_url, "/api/status", {"code": "QA-0001", "status": "Bogus"})
         assert status == 400
-        assert "Blocked" in body["error"]
+        assert "Bogus" in body["error"]
         assert scratch.status_of("QA-0001") == "Not Started"  # untouched
 
     def test_missing_status_field(self, server):
@@ -197,7 +197,7 @@ class TestSecurityAndAuth:
         base_url, scratch = server
         scratch.write_story("QA-0001", "Not Started")
         status, body = post(
-            base_url, "/api/status", {"code": "QA-0001", "status": "Done"}, origin=None, referer=base_url + "/"
+            base_url, "/api/status", {"code": "QA-0001", "status": "In Progress"}, origin=None, referer=base_url + "/"
         )
         assert status == 200
 
@@ -274,15 +274,12 @@ class TestUpdateStatusLock:
     def test_lock_directory_is_cleaned_up_after_a_normal_run(self, tmp_path):
         backlog = tmp_path / "local-backlog"
         backlog.mkdir()
-        (backlog / ".backlog-statuses.json").write_text(
-            json.dumps({"statuses": [{"name": "Not Started", "color": "gray"}, {"name": "Done", "color": "green"}]})
-        )
         story = backlog / "LK-0001-story.md"
         story.write_text(
             "# LK-0001\n\n| **Status** | Not Started |\n\n---\n## History\n- created\n\n---\n"
         )
         script = IDLE_SERVER.parent.parent.parent / "update-status" / "scripts" / "update-status.sh"
-        result = subprocess.run([str(script), str(story), "Done"], capture_output=True, text=True)
+        result = subprocess.run([str(script), str(story), "Done", "--resolution", "Done"], capture_output=True, text=True)
         assert result.returncode == 0
         assert not (backlog / f"{story.name}.lock").exists()
 
@@ -300,3 +297,57 @@ class TestServerConfiguration:
         spec.loader.exec_module(module)
 
         assert module.Server.request_queue_size >= 64
+
+
+class TestUpdateStatusResolution:
+    def _story(self, tmp_path, status="Not Started", resolution="", note=""):
+        backlog = tmp_path / "local-backlog"
+        backlog.mkdir()
+        story = backlog / "RS-0001-story.md"
+        story.write_text(
+            "# RS-0001 · x\n\n| Field | Value |\n|---|---|\n"
+            f"| **Code** | RS-0001 |\n| **Status** | {status} |\n"
+            f"| **Resolution** | {resolution} |\n| **Note** | {note} |\n"
+            "| **Updated** | 2026-01-01 |\n\n---\n\n"
+            "## History\n\n- 2026-01-01T00:00:00Z — Created\n\n---\n"
+        )
+        return story
+
+    def _run(self, *args):
+        script = IDLE_SERVER.parent.parent.parent / "update-status" / "scripts" / "update-status.sh"
+        return subprocess.run([str(script), *args], capture_output=True, text=True)
+
+    def test_done_without_resolution_is_refused(self, tmp_path):
+        story = self._story(tmp_path)
+        r = self._run(str(story), "Done")
+        assert r.returncode == 2
+        assert "requires --resolution" in r.stderr
+        assert "| **Status** | Not Started |" in story.read_text()  # untouched
+
+    def test_done_with_valid_resolution_and_note_writes_rows(self, tmp_path):
+        story = self._story(tmp_path)
+        r = self._run(str(story), "Done", "--resolution", "Won't Do", "--note", "deprioritized")
+        assert r.returncode == 0
+        text = story.read_text()
+        assert "| **Status** | Done |" in text
+        assert "| **Resolution** | Won't Do |" in text
+        assert "| **Note** | deprioritized |" in text
+
+    def test_custom_resolution_rejected(self, tmp_path):
+        story = self._story(tmp_path)
+        r = self._run(str(story), "Done", "--resolution", "Maybe")
+        assert r.returncode == 2
+        assert "Maybe" in r.stderr
+
+    def test_leaving_done_clears_rows(self, tmp_path):
+        story = self._story(tmp_path, status="Done", resolution="Won't Do", note="old")
+        r = self._run(str(story), "In Progress")
+        assert r.returncode == 0
+        text = story.read_text()
+        assert "| **Resolution** |  |" in text
+        assert "| **Note** |  |" in text
+
+    def test_resolution_on_non_done_is_rejected(self, tmp_path):
+        story = self._story(tmp_path)
+        r = self._run(str(story), "In Progress", "--resolution", "Done")
+        assert r.returncode == 1

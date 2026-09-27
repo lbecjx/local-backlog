@@ -65,30 +65,14 @@ code counter is persisted alongside it** in `local-backlog/.backlog-config.json`
 { "prefix": "NB", "lastCode": 3, "gitignored": false }
 ```
 
-The project's known `Status` values and the color each renders as in
-`/local-backlog:open-backlog`'s viewer live in a **separate** file,
-`local-backlog/.backlog-statuses.json` — ticket numbering and `Status` typing are
-unrelated concerns that happen to both be per-project config, so they don't
-share a file:
-
-```json
-{
-  "statuses": [
-    { "name": "Not Started", "color": "neutral" },
-    { "name": "In Progress", "color": "blue" },
-    { "name": "Done", "color": "green" }
-  ]
-}
-```
-
-`color` must be one of the names defined in
-`skills/update-status/references/status-colors.json` — that file is
-authoritative, not this doc; read it rather than guessing or reusing a name
-from memory, since it can gain or lose entries independently of this text.
-The `statuses` list is what makes `Status` a closed set rather than free text:
-`/local-backlog:update-status` rejects any value not in it, and the viewer
-gives an unrecognized value a distinct "needs attention" color instead of
-silently treating it as one of the known ones.
+The known `Status` values, the color each renders as, and the `Resolution`
+values are **canonical**, not per-project: they live once in the story model
+(`skills/create-story/references/story-model.json`, under
+`x-story-file.enums`) — the single source shared by the plugin and the viewer.
+`/local-backlog:update-status` rejects any `Status` not in the model, so
+`Status` is a closed set rather than free text. Read the model rather than
+guessing or reusing a value from memory, since it can gain or lose entries
+independently of this text.
 
 Both config files, and the git-tracking choice, are settled exactly once, the first time
 `local-backlog/` doesn't exist yet:
@@ -98,23 +82,18 @@ Both config files, and the git-tracking choice, are settled exactly once, the fi
 2. Ask whether `local-backlog/` should be gitignored or tracked (see Philosophy, above, for
    the actual tradeoff — this is not a formality)
 3. Create `.backlog-config.json` with that prefix, `lastCode: 0`, and the `gitignored`
-   choice; create `.backlog-statuses.json` with the 3 default `statuses` shown above — a
-   human can add more later (see `/local-backlog:update-status`'s own docs for how), but
-   don't ask about the statuses up front; the defaults cover the overwhelming majority of
-   stories
+   choice. (Status and Resolution values are canonical — nothing per-project to create.)
 4. If `gitignored: true`, add `local-backlog/` to `.gitignore` now (creating it if the
    project has none)
 5. From then on, always read the prefix, counter, and git-tracking choice from
-   `.backlog-config.json` and the statuses from `.backlog-statuses.json` — never ask for the
-   prefix or the git-tracking choice again, never recompute the counter by scanning files
+   `.backlog-config.json` — never ask for the prefix or the git-tracking choice again, never
+   recompute the counter by scanning files. (Status and Resolution values come from the
+   story model, not per-project config.)
 
 If the folder already exists but `.backlog-config.json` doesn't (backlogs
 created before this mechanism existed): infer the prefix from the pattern of
 existing filenames (`^([A-Z]+)-\d{4}-`), infer `lastCode` as the highest number
-found, and write the config so this inference never has to run again. If
-`.backlog-statuses.json` doesn't exist yet either (even on an otherwise-current
-backlog, since it was introduced later than `.backlog-config.json`): create it
-with the same 3 defaults. If `gitignored` is missing from an otherwise-current config (it
+found, and write the config so this inference never has to run again. If `gitignored` is missing from an otherwise-current config (it
 was introduced later still): ask the Step 1.2 question retroactively, once, and write the
 answer in — don't infer or default it silently, and don't leave it unasked indefinitely.
 If the retroactive answer is `true`, also check whether `local-backlog/` is already tracked

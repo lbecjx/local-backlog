@@ -44,17 +44,6 @@ class Scratch:
         (self.backlog / ".backlog-config.json").write_text(
             json.dumps({"prefix": "QA", "lastCode": 0, "gitignored": True})
         )
-        (self.backlog / ".backlog-statuses.json").write_text(
-            json.dumps(
-                {
-                    "statuses": [
-                        {"name": "Not Started", "color": "gray"},
-                        {"name": "In Progress", "color": "blue"},
-                        {"name": "Done", "color": "green"},
-                    ]
-                }
-            )
-        )
         (self.backlog / ".backlog-board.json").write_text(json.dumps({"planner": [], "archive": []}))
 
         self.stage = tmp_path / "stage"

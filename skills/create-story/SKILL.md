@@ -83,20 +83,7 @@ This check runs once per invocation, not per story in a batch request.
    e. If `gitignored: true` was chosen, add `local-backlog/` to `.gitignore` now (creating
       `.gitignore` if the project doesn't have one yet). If `false`, do nothing further —
       the folder is meant to be tracked normally.
-   f. Write `local-backlog/.backlog-statuses.json` with the 3 default statuses —
-      a separate file, deliberately: ticket numbering (`.backlog-config.json`)
-      and `Status` typing are unrelated concerns that happen to both be
-      per-project config:
-      ```json
-      {
-        "statuses": [
-          { "name": "Not Started", "color": "neutral" },
-          { "name": "In Progress", "color": "blue" },
-          { "name": "Done", "color": "green" }
-        ]
-      }
-      ```
-   g. Tell the human the folder, the prefix, and the git-tracking choice were set up
+   f. Tell the human the folder, the prefix, and the git-tracking choice were set up
 4. **If `local-backlog/` already exists** → read `local-backlog/.backlog-config.json` for
    `prefix`, `lastCode`, and `gitignored`.
    - If `.backlog-config.json` is missing or incomplete (backlog created before this
@@ -108,9 +95,6 @@ This check runs once per invocation, not per story in a batch request.
      *that* field existed): this is exactly the Step 3b question, just asked retroactively
      instead of at creation time — ask it now, once, and write the answer in. Don't infer or
      default it silently.
-   - If `.backlog-statuses.json` is missing (backlog created before *that* mechanism
-     existed, even if `.backlog-config.json` is already current): create it with the same 3
-     defaults shown above.
    - Once `gitignored` is known (whether just read or just asked), enforce it: if `true`,
      confirm `local-backlog/` is actually listed in `.gitignore` (add it if missing — a human
      could have hand-edited `.gitignore` since), AND check whether it's already tracked
