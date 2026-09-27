@@ -149,7 +149,7 @@ If several fields are already clear from context, present a **complete draft** a
 1. Filename: `local-backlog/<PREFIX>-XXXX-brief-description.md`
    - `brief-description` is kebab-case, in the language the human is writing in, max ~5 words
    - Example (prefix `NB`): `NB-0001-syntax-highlighting-codeblock.md`
-2. Use the template from `references/template.md`
+2. Use the template from `references/template.md` — its `Resolution` and `Note` rows stay empty at creation; `/local-backlog:update-status` fills them later
 3. Fill every section — mark genuinely unknown items with ⬜ rather than inventing content
 
 ### Phase 5: Confirm

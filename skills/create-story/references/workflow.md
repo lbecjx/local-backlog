@@ -74,6 +74,10 @@ values are **canonical**, not per-project: they live once in the story model
 guessing or reusing a value from memory, since it can gain or lose entries
 independently of this text.
 
+The generated metadata table carries empty `Resolution` and `Note` rows
+alongside `Status` — they start empty and are filled by
+`/local-backlog:update-status`, never at creation.
+
 Both config files, and the git-tracking choice, are settled exactly once, the first time
 `local-backlog/` doesn't exist yet:
 
