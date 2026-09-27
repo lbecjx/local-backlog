@@ -630,6 +630,19 @@ class TestHistoryLineSegments:
             self._last_history_line(story),
         )
 
+    def test_done_transition_with_a_resolution_and_no_note(self, tmp_path):
+        # The most common real flow: a human skips the note on a Done move, so
+        # only the Resolution segment is present. A regression that dropped or
+        # duplicated it when no Note follows would otherwise go unnoticed.
+        story = self._story(tmp_path)
+        r = self._run(str(story), "Done", "--resolution", "Won't Do")
+        assert r.returncode == 0
+        assert re.fullmatch(
+            r"- \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z — Status: Not Started → Done"
+            r" · Resolution: Won't Do",
+            self._last_history_line(story),
+        )
+
     def test_non_done_transition_with_a_note_records_only_the_note(self, tmp_path):
         story = self._story(tmp_path)
         r = self._run(str(story), "In Progress", "--note", "waiting on the payments API")
