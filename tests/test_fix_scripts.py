@@ -10,11 +10,13 @@
 # subprocess against a scratch local-backlog/ project — the same way the skill
 # invokes it — not a mocked helper.
 
+import json
 import subprocess
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 LIST_SCRIPT = REPO_ROOT / "skills" / "fix" / "scripts" / "list-unresolved-done.sh"
+MIGRATE_SCRIPT = REPO_ROOT / "skills" / "fix" / "scripts" / "migrate-board-archive.sh"
 UPDATE_STATUS = REPO_ROOT / "skills" / "update-status" / "scripts" / "update-status.sh"
 
 STORY = """# {code} · test story
@@ -99,3 +101,80 @@ def test_backfill_touches_only_the_unresolved_done_story(tmp_path):
     assert in_progress.read_text() == in_progress_before
     # Idempotent: once every Done story has a resolution, nothing is left.
     assert list_unresolved(backlog) == []
+
+
+def write_board(backlog, board):
+    (backlog / ".backlog-board.json").write_text(json.dumps(board))
+
+
+def read_board(backlog):
+    return json.loads((backlog / ".backlog-board.json").read_text())
+
+
+def migrate(backlog, *args):
+    return subprocess.run([str(MIGRATE_SCRIPT), *args, str(backlog)], capture_output=True, text=True)
+
+
+def test_migrate_dry_run_reports_changes_and_touches_nothing(tmp_path):
+    backlog = tmp_path / "local-backlog"
+    backlog.mkdir()
+    write_board(backlog, {"planner": ["FX-0009"], "archive": [{"code": "FX-0001"}, "FX-0002"]})
+    before = (backlog / ".backlog-board.json").read_text()
+
+    result = migrate(backlog)
+
+    assert result.returncode == 0
+    assert result.stdout.count('{"code": "FX-0001"} -> "FX-0001"') == 1
+    assert "FX-0002" not in result.stdout
+    assert (backlog / ".backlog-board.json").read_text() == before
+
+
+def test_migrate_write_rewrites_legacy_entries_and_is_idempotent(tmp_path):
+    backlog = tmp_path / "local-backlog"
+    backlog.mkdir()
+    write_board(backlog, {"planner": ["FX-0009"], "archive": [{"code": "FX-0001"}, "FX-0002"]})
+
+    result = migrate(backlog, "--write")
+    assert result.returncode == 0
+    assert read_board(backlog) == {"planner": ["FX-0009"], "archive": ["FX-0001", "FX-0002"]}
+
+    second = migrate(backlog, "--write")
+    assert second.returncode == 0
+    assert second.stdout == ""
+    assert read_board(backlog) == {"planner": ["FX-0009"], "archive": ["FX-0001", "FX-0002"]}
+
+
+def test_migrate_preserves_unrecognized_entries(tmp_path):
+    backlog = tmp_path / "local-backlog"
+    backlog.mkdir()
+    write_board(backlog, {"planner": [], "archive": [{"code": "FX-0001"}, {"code": 5}, 7]})
+
+    result = migrate(backlog, "--write")
+
+    assert result.returncode == 0
+    assert read_board(backlog)["archive"] == ["FX-0001", {"code": 5}, 7]
+
+
+def test_migrate_missing_directory_fails(tmp_path):
+    result = subprocess.run([str(MIGRATE_SCRIPT), str(tmp_path / "nope")], capture_output=True, text=True)
+    assert result.returncode == 1
+
+
+def test_migrate_missing_board_is_a_silent_noop(tmp_path):
+    backlog = tmp_path / "local-backlog"
+    backlog.mkdir()
+    result = migrate(backlog)
+    assert result.returncode == 0
+    assert result.stdout == ""
+
+
+def test_migrate_corrupt_board_fails_without_touching_it(tmp_path):
+    backlog = tmp_path / "local-backlog"
+    backlog.mkdir()
+    (backlog / ".backlog-board.json").write_text("{not json")
+
+    result = migrate(backlog, "--write")
+
+    assert result.returncode == 1
+    assert "invalid JSON" in result.stderr
+    assert (backlog / ".backlog-board.json").read_text() == "{not json"

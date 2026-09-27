@@ -48,8 +48,7 @@ if [[ ! -f "$BOARD_FILE" ]]; then
   exit 0
 fi
 
-# The JSON is nested (archive entries are objects), so python3 reads it — the
-# same reason set-board.sh does. No lock: this only reads.
+# python3 reads it — no lock, this only reads.
 python3 - "$BOARD_FILE" "$CODE" <<'PYEOF'
 import json
 import sys
@@ -71,11 +70,16 @@ archive = board.get("archive")
 planner = planner if isinstance(planner, list) else []
 archive = archive if isinstance(archive, list) else []
 
+# Archive entries are bare codes (LB-0012). A `{ "code": … }` object left by a
+# pre-LB-0012 board is not membership here — migrating it is the writer's job
+# (set-board.sh normalizes on every write) and `fix`'s, not this reader's.
+archive_codes = [e for e in archive if isinstance(e, str)]
+
 # Archive is checked first: if a code somehow appears in both lists, archive
 # wins — the same precedence the viewer resolves with, and the same invariant
 # set-board.sh maintains (it strips a code from both lists before re-adding it,
 # so overlap can only come from an externally-edited board).
-if any(isinstance(entry, dict) and entry.get("code") == code for entry in archive):
+if code in archive_codes:
     zone = "archive"
 elif code in planner:
     zone = "planner"

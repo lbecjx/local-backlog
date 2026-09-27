@@ -27,8 +27,12 @@ def write_story(backlog, code):
 
 def write_board(backlog, planner=(), archive=()):
     (backlog / ".backlog-board.json").write_text(
-        json.dumps({"planner": list(planner), "archive": [{"code": c} for c in archive]})
+        json.dumps({"planner": list(planner), "archive": list(archive)})
     )
+
+
+def write_board_raw(backlog, board):
+    (backlog / ".backlog-board.json").write_text(json.dumps(board))
 
 
 def get_board(story_path):
@@ -53,6 +57,19 @@ def test_reports_archive(tmp_path):
     result = get_board(story)
     assert result.returncode == 0
     assert result.stdout.strip() == "archive"
+
+
+def test_legacy_archive_objects_are_not_membership(tmp_path):
+    # LB-0012: archive entries are bare codes. A pre-LB-0012 `{code}` object is
+    # not read here — the board migrates on its next write (set-board.sh
+    # normalizes it) or through `fix`, not by this reader accepting two shapes.
+    backlog = tmp_path / "local-backlog"
+    backlog.mkdir()
+    story = write_story(backlog, "GB-0001")
+    write_board_raw(backlog, {"planner": [], "archive": [{"code": "GB-0001"}]})
+    result = get_board(story)
+    assert result.returncode == 0
+    assert result.stdout.strip() == "backlog"
 
 
 def test_reports_backlog_when_in_neither_list(tmp_path):

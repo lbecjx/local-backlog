@@ -115,6 +115,11 @@ Don't start guessing before you know what "broken" means here.
    that `/local-backlog:update-status` enforces on the Done transition. Run
    `scripts/list-unresolved-done.sh <local-backlog-dir>`; every path it prints
    is such a story. Repair in Step 3.
+8. **Does `.backlog-board.json` still hold legacy archive entries?** (legacy
+   data) A board written before `LB-0012` stores `archive` entries as
+   `{ "code": … }` objects; the canonical shape is a bare code string, the same
+   as `planner`. Run `scripts/migrate-board-archive.sh <local-backlog-dir>`;
+   every line it prints is such an entry. Repair in Step 3.
 
 ### Step 3: Handle each finding
 
@@ -137,6 +142,16 @@ Don't start guessing before you know what "broken" means here.
   line, since no status transition happens. Never touch a non-`Done` story;
   never overwrite a story that already has a resolution. Re-running finds
   nothing once every `Done` story is resolved (idempotent).
+- **Legacy archive entries in `.backlog-board.json` (objects instead of bare
+  codes)** → show the exact lines from `migrate-board-archive.sh`'s dry run and
+  offer to rewrite them in place; apply with
+  `scripts/migrate-board-archive.sh --write <local-backlog-dir>` only after
+  confirmation. This is a format migration, not a malfunction — but until it
+  runs, an archived story on that board reads as `backlog`: both readers
+  (`get-board.sh` and the viewer) accept bare codes only, so a board that never
+  gets written again keeps showing its archived stories in Backlog until this
+  migrates it. The script is idempotent and prints nothing once the board is
+  canonical; never migrate a board by hand.
 - **Ambiguous** (a status value that isn't a known state and isn't clearly a
   deliberate custom one either, a field that doesn't map cleanly to the
   current schema, anything you'd have to guess at) → ask the human what they

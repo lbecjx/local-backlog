@@ -12,6 +12,7 @@
 # fixture — the same way a browser client (or curl, during that manual
 # pass) actually would, not a mocked handler standing in for it.
 
+import json
 import re
 import socket
 import subprocess
@@ -163,6 +164,46 @@ class TestBoardEndpointZoneTransitions:
         assert status == 200
         assert scratch.board()["planner"] == ["QA-0001"]
 
+    def test_board_write_migrates_legacy_archive_objects(self, server):
+        # AC #2 of LB-0012: an old board stores archive entries as {code}
+        # objects; any board write converts them to bare codes in the same
+        # pass, so an active project needs no separate migration step. An
+        # entry it doesn't recognize is left as-is, not dropped.
+        base_url, scratch = server
+        (scratch.backlog / ".backlog-board.json").write_text(
+            json.dumps({"planner": [], "archive": [{"code": "QA-0002"}, {"code": 5}]})
+        )
+        scratch.write_story("QA-0001", "Not Started")
+        status, body = post(base_url, "/api/board", {"code": "QA-0001", "zone": "planner"})
+        assert status == 200
+        assert scratch.board()["archive"] == ["QA-0002", {"code": 5}]
+        assert scratch.board()["planner"] == ["QA-0001"]
+
+    def test_board_write_survives_a_non_list_membership_field(self, server):
+        # A hand-edited board can hold a string where a list belongs; the write
+        # must not iterate its characters into a bogus membership.
+        base_url, scratch = server
+        (scratch.backlog / ".backlog-board.json").write_text(
+            json.dumps({"planner": [], "archive": "QA-0002"})
+        )
+        scratch.write_story("QA-0001", "Not Started")
+        status, body = post(base_url, "/api/board", {"code": "QA-0001", "zone": "archive", "resolution": "Done"})
+        assert status == 200
+        assert scratch.board()["archive"] == ["QA-0001"]
+
+    def test_board_write_on_a_non_object_board_returns_a_clean_error(self, server):
+        # Valid JSON that isn't an object must fail like get-board.sh does — a
+        # clean message, not a Python traceback relayed to the client — and
+        # leave the file untouched.
+        base_url, scratch = server
+        (scratch.backlog / ".backlog-board.json").write_text("[]")
+        scratch.write_story("QA-0001", "Not Started")
+        status, body = post(base_url, "/api/board", {"code": "QA-0001", "zone": "planner"})
+        assert status == 500
+        assert "must contain a JSON object" in body["error"]
+        assert "Traceback" not in body["error"]
+        assert (scratch.backlog / ".backlog-board.json").read_text() == "[]"
+
     def test_archive_without_resolution_is_rejected(self, server):
         base_url, scratch = server
         scratch.write_story("QA-0001", "Not Started")
@@ -176,7 +217,7 @@ class TestBoardEndpointZoneTransitions:
         assert status == 200
         assert scratch.status_of("QA-0001") == "Done"
         archive = scratch.board()["archive"]
-        assert archive == [{"code": "QA-0001"}]
+        assert archive == ["QA-0001"]
 
     def test_archive_with_wont_do_maps_reason_to_story_note(self, server):
         base_url, scratch = server
@@ -190,7 +231,7 @@ class TestBoardEndpointZoneTransitions:
         assert scratch.status_of("QA-0001") == "Done"
         # The board carries only the code; the resolution and the free-text
         # (the viewer's 'reason') belong to the story itself.
-        assert scratch.board()["archive"] == [{"code": "QA-0001"}]
+        assert scratch.board()["archive"] == ["QA-0001"]
         assert scratch.field("QA-0001", "Resolution") == "Won't Do"
         assert scratch.field("QA-0001", "Note") == "deprioritized"
 
@@ -232,7 +273,7 @@ class TestBoardEndpointZoneTransitions:
         assert status == 200
         board = scratch.board()
         assert "QA-0001" not in board["planner"]
-        assert any(e["code"] == "QA-0001" for e in board["archive"])
+        assert "QA-0001" in board["archive"]
 
     def test_invalid_zone_rejected(self, server):
         base_url, scratch = server
@@ -272,7 +313,7 @@ class TestBoardEndpointZoneTransitions:
         post(base_url, "/api/board", {"code": "QA-0003", "zone": "archive", "resolution": "Done"})
         board = scratch.board()
         planner = set(board["planner"])
-        archive = {e["code"] for e in board["archive"]}
+        archive = set(board["archive"])
         assert not (planner & archive)
 
 
