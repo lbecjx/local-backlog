@@ -518,3 +518,33 @@ class TestUpdateStatusResolution:
         finally:
             subprocess.run(["chflags", "nouchg", str(story)], check=True)
         assert story.read_text() == before
+
+    def test_backfill_fills_an_empty_resolution_without_a_history_line(self, tmp_path):
+        # A legacy `Status: Done` story (predating the Resolution field): asking
+        # for it with a resolution fills the row — the Status does not change and
+        # no History line is invented for a transition that never happened.
+        story = self._story(tmp_path, status="Done", resolution="")
+        before_history = [line for line in story.read_text().splitlines() if line.startswith("- ")]
+        r = self._run(str(story), "Done", "--resolution", "Done")
+        assert r.returncode == 0
+        text = story.read_text()
+        assert "| **Status** | Done |" in text
+        assert "| **Resolution** | Done |" in text
+        assert [line for line in text.splitlines() if line.startswith("- ")] == before_history
+
+    def test_backfill_is_idempotent_and_never_overwrites_a_resolution(self, tmp_path):
+        story = self._story(tmp_path, status="Done", resolution="")
+        assert self._run(str(story), "Done", "--resolution", "Done").returncode == 0
+        after = story.read_text()
+        # Re-running, or asking for a different resolution once one is set,
+        # changes nothing.
+        assert self._run(str(story), "Done", "--resolution", "Done").returncode == 0
+        assert self._run(str(story), "Done", "--resolution", "Won't Do").returncode == 0
+        assert story.read_text() == after
+
+    def test_done_without_resolution_and_no_flag_is_still_a_noop(self, tmp_path):
+        story = self._story(tmp_path, status="Done", resolution="")
+        before = story.read_text()
+        r = self._run(str(story), "Done")
+        assert r.returncode == 0
+        assert story.read_text() == before

@@ -19,6 +19,10 @@
 # --resolution is required when moving into Done (from the canonical model) and
 # is written to the story's `Resolution` row (emptied when leaving Done).
 # --note is the optional free-text for the transition, written to the `Note` row.
+# A story already at Done with an empty Resolution is the legacy gap from before
+# the field existed: asking for it with --resolution fills only that row — the
+# Status does not change and no History line is added — so the invariant
+# `Status: Done ⇒ Resolution set` holds without inventing a transition.
 # With --expect, the change applies only if the story's current status still
 # equals <status> — a compare-and-swap evaluated and written inside the same
 # lock, so it can't race a concurrent write. Exit 3 = precondition failed (the
@@ -100,6 +104,12 @@ done
 trap 'rmdir "$LOCK_DIR" 2>/dev/null' EXIT
 
 OLD_STATUS=$(grep -m1 '^| \*\*Status\*\* |' "$STORY_FILE" | sed -E 's/^\| \*\*Status\*\* \| *(.*[^ ]) *\|$/\1/')
+# Stripped in two steps (not the single `(.*[^ ])` capture the Status read uses)
+# because an empty row like `| **Resolution** |  |` has no non-space value for
+# that capture to match — it would leave the whole raw line behind, reading as
+# non-empty. `s///`-then-`s///` yields "" for both an empty row and an absent one.
+OLD_RESOLUTION=$(grep -m1 '^| \*\*Resolution\*\* |' "$STORY_FILE" | sed -E 's/^\| \*\*Resolution\*\* \| *//; s/ *\|$//')
+OLD_NOTE=$(grep -m1 '^| \*\*Note\*\* |' "$STORY_FILE" | sed -E 's/^\| \*\*Note\*\* \| *//; s/ *\|$//')
 
 if [[ -z "$OLD_STATUS" ]]; then
   echo "Could not find a '| **Status** | ... |' row in $STORY_FILE — is this a story file created from the current template?" >&2
@@ -113,9 +123,18 @@ if [[ -n "$EXPECT" && "$OLD_STATUS" != "$EXPECT" ]]; then
   exit 3
 fi
 
+# A repeated status is normally a no-op, with one exception: a story already at
+# Done with no Resolution is the legacy gap (it reached Done before the field
+# existed). Asking for it with --resolution fills that gap — not a transition,
+# just the missing field. Any other repeated status stays a no-op.
+BACKFILL=0
 if [[ "$OLD_STATUS" == "$NEW_STATUS" ]]; then
-  echo "Status is already '$OLD_STATUS' — nothing to do."
-  exit 0
+  if [[ "$NEW_STATUS" == "Done" && -n "$RESOLUTION" && -z "$OLD_RESOLUTION" ]]; then
+    BACKFILL=1
+  else
+    echo "Status is already '$OLD_STATUS' — nothing to do."
+    exit 0
+  fi
 fi
 
 # Status values are canonical now: they live in the story model (the single
@@ -171,7 +190,17 @@ fi
 
 NOW_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 TODAY="${NOW_UTC%%T*}"
-HISTORY_LINE="- ${NOW_UTC} — Status: ${OLD_STATUS} → ${NEW_STATUS}"
+# A backfill is not a transition, so it appends no History line (the `## History`
+# log stays a log of status changes only) and preserves any existing Note.
+if [[ "$BACKFILL" == "1" ]]; then
+  HISTORY_LINE=""
+else
+  HISTORY_LINE="- ${NOW_UTC} — Status: ${OLD_STATUS} → ${NEW_STATUS}"
+fi
+EFFECTIVE_NOTE="$NOTE"
+if [[ "$BACKFILL" == "1" && -z "$NOTE" ]]; then
+  EFFECTIVE_NOTE="$OLD_NOTE"
+fi
 
 TMP_FILE=$(mktemp)
 
@@ -182,7 +211,7 @@ TMP_FILE=$(mktemp)
 # keeps a raw newline out of the program text entirely. The exit status is
 # checked before the move so an awk failure can never overwrite the story with
 # the empty temp file.
-if ! NEW_STATUS="$NEW_STATUS" TODAY="$TODAY" HISTORY_LINE="$HISTORY_LINE" RESOLUTION="$RESOLUTION" NOTE="$NOTE" awk '
+if ! NEW_STATUS="$NEW_STATUS" TODAY="$TODAY" HISTORY_LINE="$HISTORY_LINE" RESOLUTION="$RESOLUTION" NOTE="$EFFECTIVE_NOTE" awk '
   BEGIN {
     new_status = ENVIRON["NEW_STATUS"]
     today = ENVIRON["TODAY"]
@@ -202,7 +231,7 @@ if ! NEW_STATUS="$NEW_STATUS" TODAY="$TODAY" HISTORY_LINE="$HISTORY_LINE" RESOLU
   /^## History$/ { print; in_history = 1; next }
   in_history && /^- / { print; saw_entry = 1; next }
   in_history && saw_entry && $0 == "" {
-    print history_line
+    if (history_line != "") print history_line
     print
     in_history = 0
     next
@@ -223,6 +252,10 @@ if ! mv "$TMP_FILE" "$STORY_FILE"; then
   exit 1
 fi
 
-echo "Status: ${OLD_STATUS} → ${NEW_STATUS}"
-[[ -n "$RESOLUTION" ]] && echo "Resolution: ${RESOLUTION}"
-echo "Appended: ${HISTORY_LINE}"
+if [[ "$BACKFILL" == "1" ]]; then
+  echo "Resolution: ${RESOLUTION} (backfilled; Status unchanged: ${NEW_STATUS})"
+else
+  echo "Status: ${OLD_STATUS} → ${NEW_STATUS}"
+  [[ -n "$RESOLUTION" ]] && echo "Resolution: ${RESOLUTION}"
+  echo "Appended: ${HISTORY_LINE}"
+fi
