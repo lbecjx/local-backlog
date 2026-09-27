@@ -24,8 +24,9 @@
 # reason survives the next transition overwriting the single `Note` row.
 # A story already at Done with an empty Resolution is the legacy gap from before
 # the field existed: asking for it with --resolution fills only that row — the
-# Status does not change and no History line is added — so the invariant
-# `Status: Done ⇒ Resolution set` holds without inventing a transition.
+# Status does not change, no History line is added, and any existing Note is
+# left untouched — so the invariant `Status: Done ⇒ Resolution set` holds
+# without inventing a transition.
 # With --expect, the change applies only if the story's current status still
 # equals <status> — a compare-and-swap evaluated and written inside the same
 # lock, so it can't race a concurrent write. Exit 3 = precondition failed (the
@@ -215,7 +216,11 @@ else
   fi
 fi
 EFFECTIVE_NOTE="$NOTE"
-if [[ "$BACKFILL" == "1" && -z "$NOTE" ]]; then
+# On a backfill the note has no transition to attach to, so an existing one must
+# survive: overwriting it here would destroy the story's current note with no
+# History line recording what it was. A note passed alongside a backfill is
+# therefore only used to fill a row that is still empty.
+if [[ "$BACKFILL" == "1" && -n "$OLD_NOTE" ]]; then
   EFFECTIVE_NOTE="$OLD_NOTE"
 fi
 
@@ -253,7 +258,30 @@ if ! NEW_STATUS="$NEW_STATUS" TODAY="$TODAY" HISTORY_LINE="$HISTORY_LINE" RESOLU
     in_history = 0
     next
   }
+  in_history && saw_entry {
+    # The entry block ended without a blank line after it — a trailing `---`,
+    # another heading, anything. Append the line HERE, before that line, rather
+    # than dropping it or letting it land outside `## History`. Without this the
+    # transition (and now the note, which rides entirely on this line) was lost
+    # while the script still printed `Appended: …` and exited 0.
+    if (history_line != "") print history_line
+    in_history = 0
+    next
+  }
+  in_history && $0 != "" {
+    # Same, for a section that has NO entry yet (a malformed story). `saw_entry`
+    # is deliberately not required here: past the heading, a non-blank line means
+    # the section is over, so this can never fire on the blank line that merely
+    # precedes the first real entry.
+    if (history_line != "") print history_line
+    in_history = 0
+  }
   { print }
+  END {
+    # The `## History` block ran to the end of the file with no blank line and no
+    # following line to trigger either append above.
+    if (in_history && history_line != "") print history_line
+  }
 ' "$STORY_FILE" > "$TMP_FILE"; then
   rm -f "$TMP_FILE"
   echo "Failed to rewrite $STORY_FILE — left unchanged." >&2
