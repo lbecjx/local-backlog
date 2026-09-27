@@ -14,6 +14,13 @@ All notable changes to this plugin are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/), versioning follows
 [Semantic Versioning](https://semver.org/).
 
+## 1.3.1
+
+- The viewer's server now uses a larger accept backlog, so the burst of
+  parallel requests the viewer fires on startup can no longer overflow the
+  listen queue and drop a connection — which previously surfaced as a full
+  "Error reading the backlog" for a backlog that actually exists.
+
 ## 1.3.0
 
 - Renamed the project backlog folder from `backlog/` to `local-backlog/` — a

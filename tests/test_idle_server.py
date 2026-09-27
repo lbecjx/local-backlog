@@ -285,3 +285,18 @@ class TestUpdateStatusLock:
         result = subprocess.run([str(script), str(story), "Done"], capture_output=True, text=True)
         assert result.returncode == 0
         assert not (backlog / f"{story.name}.lock").exists()
+
+
+class TestServerConfiguration:
+    def test_accept_backlog_absorbs_the_viewer_startup_burst(self):
+        # Import idle_server.py directly (it's import-safe: no argv access and
+        # no server start at import) and assert its accept backlog comfortably
+        # exceeds the viewer's ~11-connection startup burst. The stdlib default
+        # request_queue_size is 5, which that burst overflowed under load.
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("idle_server", str(IDLE_SERVER))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        assert module.Server.request_queue_size >= 64

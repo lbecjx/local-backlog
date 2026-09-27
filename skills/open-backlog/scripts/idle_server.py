@@ -25,8 +25,11 @@ import threading
 import time
 import urllib.parse
 
-PORT = int(sys.argv[1])
-DIRECTORY = sys.argv[2]
+# Real values are parsed from argv in __main__ below. The module stays
+# import-safe (no argv access, no server start, no watchdog thread at import)
+# so tests can import it and inspect the server configuration directly.
+PORT = 0
+DIRECTORY = ""
 IDLE_TIMEOUT = 30 * 60  # 30 minutes — matches the time an unattended tab is
                         # assumed abandoned, not the time a single click takes
 
@@ -356,7 +359,23 @@ def watchdog():
             os._exit(0)  # no state to flush — just static files, exit immediately
 
 
-threading.Thread(target=watchdog, daemon=True).start()
+class Server(socketserver.ThreadingTCPServer):
+    # The viewer opens ~11 connections at once on startup (the directory
+    # listing + 8 parallel story fetches + 2 config files). The stdlib default
+    # request_queue_size is 5, which that burst can overflow — an overflowed
+    # accept queue drops a connection, and the client turns one dropped story
+    # fetch into a full "Error reading the backlog". A comfortably larger
+    # backlog absorbs the burst.
+    request_queue_size = 128
+    daemon_threads = True
+    allow_reuse_address = True
 
-with socketserver.ThreadingTCPServer(("", PORT), Handler) as httpd:
-    httpd.serve_forever()
+
+if __name__ == "__main__":
+    PORT = int(sys.argv[1])
+    DIRECTORY = sys.argv[2]
+
+    threading.Thread(target=watchdog, daemon=True).start()
+
+    with Server(("", PORT), Handler) as httpd:
+        httpd.serve_forever()
