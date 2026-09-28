@@ -14,6 +14,17 @@ All notable changes to this plugin are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/), versioning follows
 [Semantic Versioning](https://semver.org/).
 
+## 1.8.0
+
+- The board's `archive` list now stores bare code strings (`["LB-0001"]`),
+  matching `planner`. `set-board.sh` rewrites legacy `{ "code": … }` entries on
+  its next write, and `get-board.sh` reads bare codes only.
+- `/local-backlog:fix` can detect and rewrite legacy `{ "code": … }` archive
+  entries (dry run first, confirmation before writing).
+- The bundled viewer is rebuilt from `backlog-viewer` `0.2.0`: archived stories
+  stay out of the Backlog list, and a card's title is struck through by the
+  story's `Resolution`.
+
 ## 1.7.0
 
 - Any status change can now carry an optional **note**, not just a move to
