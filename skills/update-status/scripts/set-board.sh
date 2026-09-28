@@ -16,16 +16,21 @@
 # planner in the same pass, and setting planner or backlog removes it from
 # archive — a single write can't leave the file in an inconsistent state.
 #
-# An archive entry is an object `{ "code": <code> }` and nothing else: a
-# story's Resolution and free-text Note belong to the story file itself
-# (written by update-status.sh on the Done transition), not to the board —
-# the board only records which zone a code sits in.
+# An archive entry is a bare code string, exactly like `planner`: the board
+# only records which zone a code sits in. A story's Resolution and free-text
+# Note belong to the story file itself (written by update-status.sh on the
+# Done transition), not to the board.
 #
-# The JSON here is nested (archive entries are objects, not bare strings),
-# unlike update-status.sh's flat status list — grep/sed on that shape is
-# fragile, so this shells out to python3 for the read-modify-write. python3
-# is already a hard dependency of this plugin (idle_server.py requires it),
-# not a new one.
+# Older boards still hold archive entries as `{ "code": <code> }` objects —
+# that object used to carry the resolution and reason. This script reads both
+# shapes and rewrites every entry as a bare code in the same pass, so any
+# board it touches comes out canonical with no separate migration step (see
+# LB-0012).
+#
+# python3 does the read-modify-write for the fcntl lock and the atomic
+# os.replace below (bash can't do either portably), not because the JSON is
+# nested. python3 is already a hard dependency of this plugin (idle_server.py
+# requires it), not a new one.
 #
 # Usage: set-board.sh <story-file> <backlog|planner|archive>
 # Prints the resulting zone.
@@ -100,19 +105,46 @@ try:
     else:
         board = {}
 
+    # Valid JSON that isn't an object (a list, a string, a number) reaches
+    # `setdefault` below as an AttributeError otherwise, and idle_server relays
+    # the traceback to the client. Fail the same clean way get-board.sh does.
+    if not isinstance(board, dict):
+        print(f"{board_file} must contain a JSON object", file=sys.stderr)
+        sys.exit(1)
+
     board.setdefault("planner", [])
     board.setdefault("archive", [])
+
+    # A hand-edited board can hold a non-list (a string, an object) where a
+    # list belongs; treating it as an empty list keeps the list comprehensions
+    # below from iterating its characters/keys into a bogus membership.
+    board["planner"] = board["planner"] if isinstance(board["planner"], list) else []
+    board["archive"] = board["archive"] if isinstance(board["archive"], list) else []
+
+    # Normalize archive entries to bare codes in the same pass — this is what
+    # migrates a board written before LB-0012 (entries as { "code": … }) into
+    # the canonical shape, so the file is clean after any board write. Only a
+    # `{ "code": <string> }` object is converted; anything else is left exactly
+    # as it is — the readers treat a non-string as non-membership anyway, so
+    # this repairs the known shape rather than dropping data it doesn't
+    # recognize (the same policy as the fix skill's migration script).
+    def archive_code(entry):
+        if isinstance(entry, dict) and isinstance(entry.get("code"), str):
+            return entry["code"]
+        return entry
+
+    board["archive"] = [archive_code(e) for e in board["archive"]]
 
     # Strip the code from both lists first, then re-add it to whichever
     # zone this call actually asked for — this is what guarantees a code
     # is never in more than one list after any single write.
     board["planner"] = [c for c in board["planner"] if c != code]
-    board["archive"] = [e for e in board["archive"] if e.get("code") != code]
+    board["archive"] = [c for c in board["archive"] if c != code]
 
     if zone == "planner":
         board["planner"].append(code)
     elif zone == "archive":
-        board["archive"].append({"code": code})
+        board["archive"].append(code)
     # zone == "backlog": already removed from both lists above, nothing to add
 
     tmp_file = board_file + ".tmp"
