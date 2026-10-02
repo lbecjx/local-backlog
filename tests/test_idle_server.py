@@ -13,7 +13,9 @@
 # pass) actually would, not a mocked handler standing in for it.
 
 import json
+import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -460,6 +462,84 @@ class TestUpdateStatusLock:
         result = subprocess.run([str(script), str(story), "Done", "--resolution", "Done"], capture_output=True, text=True)
         assert result.returncode == 0
         assert not (backlog / f"{story.name}.lock").exists()
+
+    STORY = (
+        "# LK-0001\n\n| **Status** | Not Started |\n\n---\n## History\n- created\n\n---\n"
+    )
+
+    @staticmethod
+    def _script():
+        return IDLE_SERVER.parent.parent.parent / "update-status" / "scripts" / "update-status.sh"
+
+    def _story(self, tmp_path, text=None):
+        backlog = tmp_path / "local-backlog"
+        backlog.mkdir()
+        story = backlog / "LK-0001-story.md"
+        story.write_text(self.STORY if text is None else text)
+        return backlog, story
+
+    def test_the_stories_file_mode_is_kept(self, tmp_path):
+        backlog, story = self._story(tmp_path)
+        story.chmod(0o644)
+
+        result = subprocess.run([str(self._script()), str(story), "In Progress"], capture_output=True, text=True)
+
+        assert result.returncode == 0, result.stderr
+        assert story.stat().st_mode & 0o777 == 0o644
+
+    def test_nothing_is_left_behind_after_a_successful_run(self, tmp_path):
+        backlog, story = self._story(tmp_path)
+
+        subprocess.run([str(self._script()), str(story), "In Progress"], capture_output=True, text=True)
+
+        assert sorted(p.name for p in backlog.iterdir()) == [story.name]
+
+    @pytest.mark.parametrize(
+        "args, text, code",
+        [
+            (["Nope"], None, 2),
+            (["In Progress", "--expect", "Done"], None, 3),
+            (["In Progress"], "# LK-0001\n\n| **Status** | Not Started |\n", 1),
+        ],
+        ids=["non-canonical status", "--expect mismatch", "no History section"],
+    )
+    def test_nothing_is_left_behind_after_a_refused_run(self, tmp_path, args, text, code):
+        backlog, story = self._story(tmp_path, text)
+        before = story.read_text()
+
+        result = subprocess.run([str(self._script()), str(story), *args], capture_output=True, text=True)
+
+        assert result.returncode == code
+        assert story.read_text() == before
+        assert sorted(p.name for p in backlog.iterdir()) == [story.name]
+
+    def test_an_interrupt_mid_write_leaves_no_lock_or_temp_file(self, tmp_path):
+        backlog, story = self._story(tmp_path)
+        before = story.read_text()
+        # A shim awk that stalls, so the run is interrupted after the lock is
+        # taken and the temp file exists but before the story is replaced.
+        shim_dir = tmp_path / "shim"
+        shim_dir.mkdir()
+        shim = shim_dir / "awk"
+        shim.write_text(f'#!/bin/bash\nsleep 5\nexec {shutil.which("awk")} "$@"\n')
+        shim.chmod(0o755)
+        env = {**os.environ, "PATH": f"{shim_dir}:{os.environ['PATH']}"}
+
+        proc = subprocess.Popen([str(self._script()), str(story), "In Progress"], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            deadline = time.time() + 5
+            while time.time() < deadline and len(list(backlog.iterdir())) < 3:
+                time.sleep(0.05)
+            assert len(list(backlog.iterdir())) == 3, "the run never reached the write step"
+            proc.terminate()
+            proc.wait(timeout=10)
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+
+        assert proc.returncode == 143
+        assert story.read_text() == before
+        assert sorted(p.name for p in backlog.iterdir()) == [story.name]
 
 
 class TestServerConfiguration:
