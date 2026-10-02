@@ -39,6 +39,7 @@
     "created": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
     "updated": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
     "history": {
+      "description": "The status transitions in the story's log — lines of the form historySection.line. The section's other lines (historySection.nonTransitionLines) are not entries.",
       "type": "array",
       "items": { "$ref": "#/$defs/historyEntry" }
     },
@@ -50,7 +51,7 @@
   "$defs": {
     "historyEntry": {
       "title": "history entry",
-      "description": "One appended line of the story's status-update log. Append-only: past entries are never edited or removed.",
+      "description": "One appended status transition in the story's log. Append-only: past entries are never edited or removed. A line that is not a transition (see historySection.nonTransitionLines) is not a historyEntry.",
       "type": "object",
       "properties": {
         "at": {
@@ -94,7 +95,11 @@
     "historySection": {
       "heading": "## History",
       "line": "- <at> — Status: <from> → <to>[ · Resolution: <resolution>][ · Note: <note>]",
-      "description": "Reading an entry: the segments are ORDERED and Note is terminal, but a note is free text and may itself contain ` · ` (only newline, CR and `|` are refused, because the note also lands in a table cell). So take everything after the FIRST ` · Note: ` as the note, and look for ` · Resolution: ` only in the part BEFORE it — never split on the last occurrence, and never search for a marker across the whole line. A ` · Resolution: ` that appears inside a note's own text is part of that note, not a segment."
+      "nonTransitionLines": [
+        { "name": "created", "line": "- <at> — Created (Status: Not Started)", "writtenBy": "create-story (the template's first entry)" },
+        { "name": "history-section-added", "line": "- <at> — History section added by /local-backlog:fix (story predates it)", "writtenBy": "fix (repair-missing-history.sh)" }
+      ],
+      "description": "The section is not only transitions: the lines in nonTransitionLines carry the same UTC timestamp but no ` — Status: <from> → <to>`. A reader looking for transitions takes only the lines that have ` — Status: ` right after the timestamp and SKIPS the rest — it must not reject or error on them. Reading a transition entry: the segments are ORDERED and Note is terminal, but a note is free text and may itself contain ` · ` (only newline, CR and `|` are refused, because the note also lands in a table cell). So take everything after the FIRST ` · Note: ` as the note, and look for ` · Resolution: ` only in the part BEFORE it — never split on the last occurrence, and never search for a marker across the whole line. A ` · Resolution: ` that appears inside a note's own text is part of that note, not a segment."
     },
     "enums": {
       "status": {

@@ -357,6 +357,20 @@ def test_repair_keeps_the_stories_file_mode(tmp_path):
     assert story.stat().st_mode & 0o777 == 0o644
 
 
+def test_repair_in_a_group_writable_folder_still_repairs_and_leaves_nothing(tmp_path):
+    backlog = scratch_backlog(tmp_path)
+    story = write_legacy(backlog)
+    story.chmod(0o644)
+    backlog.chmod(0o775)  # shared folder: the temp file is kept out of it
+
+    result = repair(backlog, "--write")
+
+    assert result.returncode == 0, result.stderr
+    assert "## History" in story.read_text()
+    assert story.stat().st_mode & 0o777 == 0o644
+    assert sorted(p.name for p in backlog.iterdir()) == ["FX-0001-legacy.md"]
+
+
 def test_repair_only_touches_story_files(tmp_path):
     backlog = scratch_backlog(tmp_path)
     notes = backlog / "notes.md"

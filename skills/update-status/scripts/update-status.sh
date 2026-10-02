@@ -96,16 +96,52 @@ reject_bad_value note "$NOTE"
 # near-simultaneous calls read the same pre-write file and one silently
 # clobbers the other's History append.
 LOCK_DIR="${STORY_FILE}.lock"
+LOCK_POLL=0.05       # seconds between attempts
+LOCK_MAX_TRIES=200   # 200 × 0.05s — the 10s the timeout message states
 LOCK_WAIT=0
 until mkdir "$LOCK_DIR" 2>/dev/null; do
-  sleep 0.05
+  sleep "$LOCK_POLL"
   LOCK_WAIT=$((LOCK_WAIT + 1))
-  if [[ "$LOCK_WAIT" -ge 200 ]]; then
+  if [[ "$LOCK_WAIT" -ge "$LOCK_MAX_TRIES" ]]; then
     echo "Could not acquire lock on $STORY_FILE after 10s — another update may be stuck" >&2
     exit 1
   fi
 done
-trap 'rmdir "$LOCK_DIR" 2>/dev/null' EXIT
+# One cleanup for everything this run holds — the lock and the temp file below —
+# on every exit path and on INT/TERM. A leaked `<story>.lock` makes every later
+# update of that story wait out the 10s timeout above until someone removes it.
+# The rmdir is best-effort: there is nothing useful to do if it fails. INT/TERM
+# exit with 128+signal so the EXIT trap runs `release` and callers still see the
+# signal. The trap goes in after the lock is taken, on purpose — installed before,
+# a run that timed out would remove another run's lock; so a signal in the few
+# instructions between `mkdir` and here can still leak the lock. Closing that fully
+# would mean masking signals around every lock attempt; SIGKILL can leak it anyway.
+CUR_TMP=""
+release() {
+  [[ -n "$CUR_TMP" ]] && rm -f "$CUR_TMP"
+  rmdir "$LOCK_DIR" 2>/dev/null
+}
+trap release EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+# Where the temp file goes. Next to the story (same filesystem, so the final `mv`
+# is an atomic rename) — but only when that folder is positively private: owned by
+# the user and not writable by group or others. Anywhere else someone could swap
+# the temp file for a symlink between `mktemp` and the write, and the write would
+# land in whatever file it points at. So the test fails closed (a `find` error, a
+# folder owned by someone else, an ACL it cannot see all fall through) to $TMPDIR,
+# a per-user directory, at the cost of a non-atomic move.
+# Neither name ends in `.md`, so no `*.md` glob (this plugin's, the viewer's) sees it.
+temp_template() {
+  local dir
+  dir=$(dirname "$1")
+  if [[ -n "$(find "$dir" -maxdepth 0 -user "$(id -u)" ! -perm -020 ! -perm -002 2>/dev/null)" ]]; then
+    echo "$1.XXXXXX"
+  else
+    echo "${TMPDIR:-/tmp}/$(basename "$1").XXXXXX"
+  fi
+}
 
 OLD_STATUS=$(grep -m1 '^| \*\*Status\*\* |' "$STORY_FILE" | sed -E 's/^\| \*\*Status\*\* \| *(.*[^ ]) *\|$/\1/')
 # Stripped in two steps (not the single `(.*[^ ])` capture the Status read uses)
@@ -224,7 +260,28 @@ if [[ "$BACKFILL" == "1" && -n "$OLD_NOTE" ]]; then
   EFFECTIVE_NOTE="$OLD_NOTE"
 fi
 
-TMP_FILE=$(mktemp)
+# `mktemp` creates the file 0600 and `mv` would carry that onto the story, so the
+# story's mode is read now and put back on the temp file just before the move. It
+# is carried by value (`chmod`), not with `cp -p`: on macOS `cp -p` also copies file
+# flags, and an immutable story would yield an immutable temp file that the
+# cleanup could not remove. GNU `stat -c` is tried first because BSD `stat` takes
+# `-f` for the format, where GNU `-f` means something else and exits 0.
+# Signals are ignored (not deferred) for the two lines that create the temp file and
+# record it, so an interrupt can't land between them and strand it.
+trap '' INT TERM
+if ! TMP_FILE=$(mktemp "$(temp_template "$STORY_FILE")"); then
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  echo "Failed to create a temp file for $STORY_FILE — left unchanged." >&2
+  exit 1
+fi
+CUR_TMP="$TMP_FILE"
+trap 'exit 130' INT
+trap 'exit 143' TERM
+if ! ORIG_MODE=$(stat -c %a "$STORY_FILE" 2>/dev/null || stat -f %Lp "$STORY_FILE" 2>/dev/null); then
+  echo "Failed to read the file mode of $STORY_FILE — left unchanged." >&2
+  exit 1
+fi
 
 # The values are passed through the environment, not awk -v: -v runs each
 # through awk's own escape processing, so a backslash in a note (e.g. a Windows
@@ -283,8 +340,12 @@ if ! NEW_STATUS="$NEW_STATUS" TODAY="$TODAY" HISTORY_LINE="$HISTORY_LINE" RESOLU
     if (in_history && history_line != "") print history_line
   }
 ' "$STORY_FILE" > "$TMP_FILE"; then
-  rm -f "$TMP_FILE"
   echo "Failed to rewrite $STORY_FILE — left unchanged." >&2
+  exit 1
+fi
+
+if ! chmod "$ORIG_MODE" "$TMP_FILE"; then
+  echo "Failed to set the file mode on the rewritten $STORY_FILE — left unchanged." >&2
   exit 1
 fi
 
@@ -292,10 +353,10 @@ fi
 # would otherwise leave the story unchanged while the script still reported
 # success and printed the transition.
 if ! mv "$TMP_FILE" "$STORY_FILE"; then
-  rm -f "$TMP_FILE"
   echo "Failed to write $STORY_FILE — left unchanged." >&2
   exit 1
 fi
+CUR_TMP=""
 
 if [[ "$BACKFILL" == "1" ]]; then
   echo "Resolution: ${RESOLUTION} (backfilled; Status unchanged: ${NEW_STATUS})"

@@ -54,7 +54,7 @@ has_history() {
 # return path and on INT/TERM, so a normal failure or a Ctrl-C does not leave a
 # `<story>.lock` behind: that directory would make update-status.sh wait out its
 # 10s timeout on the story until someone removed it by hand. (A signal landing in
-# the instant between `mkdir`/`mktemp` and recording it below can still leak one.)
+# the instant between `mkdir` and recording the lock below can still leak it.)
 CUR_LOCK=""
 CUR_TMP=""
 release() {
@@ -64,11 +64,26 @@ release() {
   CUR_LOCK=""
 }
 trap release EXIT
-trap 'exit 130' INT
+trap 'exit 130' INT   # 128+signal: the EXIT trap still runs `release`
 trap 'exit 143' TERM
 
-# Runs with the lock held. Writes the repaired copy next to the story, so the
-# final `mv` is a same-filesystem rename — atomic — rather than a copy.
+# Where the temp file goes. Next to the story (same filesystem, so the final `mv`
+# is an atomic rename) — but only when that folder is positively private: owned by
+# the user and not writable by group or others. Anywhere else someone could swap
+# the temp file for a symlink between `mktemp` and the write. The test fails closed
+# to $TMPDIR, at the cost of a non-atomic move; update-status.sh makes the same call.
+# Neither name ends in `.md`, so the `*.md` glob below never sees it.
+temp_template() {
+  local dir
+  dir=$(dirname "$1")
+  if [[ -n "$(find "$dir" -maxdepth 0 -user "$(id -u)" ! -perm -020 ! -perm -002 2>/dev/null)" ]]; then
+    echo "$1.XXXXXX"
+  else
+    echo "${TMPDIR:-/tmp}/$(basename "$1").XXXXXX"
+  fi
+}
+
+# Runs with the lock held.
 rewrite_story() {
   local file="$1"
 
@@ -80,16 +95,27 @@ rewrite_story() {
 
   local now
   now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-  if ! CUR_TMP=$(mktemp "${file}.XXXXXX"); then
+  # Signals are ignored (not deferred) for the two lines that create the temp file
+  # and record it, so an interrupt can't land between them and strand it.
+  trap '' INT TERM
+  if ! CUR_TMP=$(mktemp "$(temp_template "$file")"); then
     CUR_TMP=""
-    echo "Failed to create a temp file next to $file — left unchanged." >&2
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    echo "Failed to create a temp file for $file — left unchanged." >&2
     return 1
   fi
-  # mktemp creates the file 0600, and mv would carry that onto the story.
-  # Copying the original first keeps its mode; the redirect below only
-  # truncates and refills it.
-  if ! cp -p "$file" "$CUR_TMP"; then
-    echo "Failed to prepare a copy of $file — left unchanged." >&2
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  # mktemp creates the file 0600 and mv would carry that onto the story, so the
+  # story's mode is read now and put back on the temp file just before the move.
+  # By value (chmod), not `cp -p`: on macOS `cp -p` also copies file flags, and an
+  # immutable story would yield an immutable temp file that cleanup cannot remove.
+  # GNU `stat -c` goes first: BSD `stat` takes `-f` for the format, where GNU `-f`
+  # means something else and exits 0.
+  local mode
+  if ! mode=$(stat -c %a "$file" 2>/dev/null || stat -f %Lp "$file" 2>/dev/null); then
+    echo "Failed to read the file mode of $file — left unchanged." >&2
     return 1
   fi
 
@@ -131,6 +157,11 @@ rewrite_story() {
     return 1
   fi
 
+  if ! chmod "$mode" "$CUR_TMP"; then
+    echo "Failed to set the file mode on the repaired $file — left unchanged." >&2
+    return 1
+  fi
+
   # Checked too, so an unwritable story is reported instead of looking repaired.
   if ! mv "$CUR_TMP" "$file"; then
     echo "Failed to write $file — left unchanged." >&2
@@ -139,6 +170,9 @@ rewrite_story() {
   CUR_TMP=""
   return 0
 }
+
+LOCK_POLL=0.05       # seconds between attempts — same as update-status.sh
+LOCK_MAX_TRIES=200   # 200 × 0.05s — the 10s the timeout message states
 
 repair_file() {
   local file="$1"
@@ -149,9 +183,9 @@ repair_file() {
   # update-status.sh takes, so a repair can't interleave with a status change
   # on the same story.
   until mkdir "$lock_dir" 2>/dev/null; do
-    sleep 0.05
+    sleep "$LOCK_POLL"
     wait=$((wait + 1))
-    if [[ "$wait" -ge 200 ]]; then
+    if [[ "$wait" -ge "$LOCK_MAX_TRIES" ]]; then
       echo "Could not acquire lock on $file after 10s — another update may be stuck" >&2
       return 1
     fi
