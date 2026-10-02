@@ -48,6 +48,14 @@ ln -sfn "$REPO_ROOT/local-backlog" "$STAGE/backlog"
 # dev/test runs, never meant to reach a real project through this script).
 cp "$SCRIPT_DIR/../../create-story/references/story-model.json" "$STAGE/story-model.json"
 
+# The viewer's header shows this name so a human with several of these
+# servers open (one per project, each on its own port) can tell tabs apart
+# at a glance — see backlog-viewer's own project.json fetch. JSON-encoded via
+# python3 (already required above) rather than hand-built, since a repo
+# folder name can legally contain a `"` or `\`.
+PROJECT_NAME="$(basename "$REPO_ROOT")"
+python3 -c 'import json, sys; json.dump({"name": sys.argv[1]}, sys.stdout)' "$PROJECT_NAME" > "$STAGE/project.json"
+
 PORT=""
 if [ -f "$STAGE/.viewer.pid" ]; then
   PID=$(cut -d: -f1 "$STAGE/.viewer.pid")
