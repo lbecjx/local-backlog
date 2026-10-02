@@ -14,6 +14,12 @@ All notable changes to this plugin are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/), versioning follows
 [Semantic Versioning](https://semver.org/).
 
+## 1.9.1
+
+- `/local-backlog:update-status` now keeps a story's file mode, and removes its
+  lock and temp file when it is interrupted.
+- The story model describes the History lines that are not status transitions.
+
 ## 1.9.0
 
 - `/local-backlog:fix` now detects stories missing a `## History` section —
