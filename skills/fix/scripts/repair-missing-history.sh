@@ -21,7 +21,8 @@
 # without entries — update-status.sh accepts both, so neither is broken.
 #
 # Runs as a dry run by default (prints one path per story it would repair and
-# touches nothing); pass --write to apply. Idempotent: once every story has the
+# touches nothing); pass --write to apply, which prints each path it repaired.
+# A symlink in the folder is skipped with a message, never rewritten. Idempotent: once every story has the
 # section, the dry run prints nothing and --write is a no-op.
 #
 # Usage: repair-missing-history.sh [--write] [backlog-dir]   (default: ./local-backlog)
@@ -49,6 +50,96 @@ has_history() {
   grep -q '^## History$' "$1"
 }
 
+# The lock and the temp file currently held. One cleanup releases both on every
+# return path and on INT/TERM, so a normal failure or a Ctrl-C does not leave a
+# `<story>.lock` behind: that directory would make update-status.sh wait out its
+# 10s timeout on the story until someone removed it by hand. (A signal landing in
+# the instant between `mkdir`/`mktemp` and recording it below can still leak one.)
+CUR_LOCK=""
+CUR_TMP=""
+release() {
+  [[ -n "$CUR_TMP" ]] && rm -f "$CUR_TMP"
+  [[ -n "$CUR_LOCK" ]] && rmdir "$CUR_LOCK" 2>/dev/null
+  CUR_TMP=""
+  CUR_LOCK=""
+}
+trap release EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+# Runs with the lock held. Writes the repaired copy next to the story, so the
+# final `mv` is a same-filesystem rename — atomic — rather than a copy.
+rewrite_story() {
+  local file="$1"
+
+  # Re-checked under the lock: a concurrent writer may have added the section
+  # between the scan and here.
+  if has_history "$file"; then
+    return 0
+  fi
+
+  local now
+  now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  if ! CUR_TMP=$(mktemp "${file}.XXXXXX"); then
+    CUR_TMP=""
+    echo "Failed to create a temp file next to $file — left unchanged." >&2
+    return 1
+  fi
+  # mktemp creates the file 0600, and mv would carry that onto the story.
+  # Copying the original first keeps its mode; the redirect below only
+  # truncates and refills it.
+  if ! cp -p "$file" "$CUR_TMP"; then
+    echo "Failed to prepare a copy of $file — left unchanged." >&2
+    return 1
+  fi
+
+  # The entry goes through the environment, not awk -v, which would run it
+  # through awk's escape processing. The file is held in memory because the
+  # insertion point (the closing `---` just above the footer) is only known
+  # once the whole file has been read. Comparisons ignore a trailing \r so a
+  # CRLF story is anchored the same way as an LF one.
+  if ! HISTORY_ENTRY="- ${now} — History section added by /local-backlog:fix (story predates it)" awk '
+    function bare(s) { sub(/\r$/, "", s); return s }
+    function emit_section(need_blank) {
+      if (need_blank) print ""
+      print "## History"
+      print ""
+      print ENVIRON["HISTORY_ENTRY"]
+      print ""
+    }
+    { line[NR] = $0 }
+    /^> Generated with/ { footer = NR }
+    END {
+      at = 0
+      if (footer) {
+        # The closing `---` is the nearest non-blank line above the footer; any
+        # other `---` (the one under the metadata table, a rule inside the
+        # body) is not the end of the story and is never used.
+        i = footer - 1
+        while (i >= 1 && bare(line[i]) == "") i--
+        at = (i >= 1 && bare(line[i]) == "---") ? i : footer
+      }
+      for (n = 1; n <= NR; n++) {
+        if (n == at) emit_section(at > 1 && bare(line[at - 1]) != "")
+        print line[n]
+      }
+      # No footer to anchor on: append at the end of the file.
+      if (!at) emit_section(NR > 0 && bare(line[NR]) != "")
+    }
+  ' "$file" > "$CUR_TMP"; then
+    echo "Failed to rewrite $file — left unchanged." >&2
+    return 1
+  fi
+
+  # Checked too, so an unwritable story is reported instead of looking repaired.
+  if ! mv "$CUR_TMP" "$file"; then
+    echo "Failed to write $file — left unchanged." >&2
+    return 1
+  fi
+  CUR_TMP=""
+  return 0
+}
+
 repair_file() {
   local file="$1"
   local lock_dir="${file}.lock"
@@ -65,75 +156,12 @@ repair_file() {
       return 1
     fi
   done
+  CUR_LOCK="$lock_dir"
 
-  # Re-checked under the lock: a concurrent writer may have added the section
-  # between the scan and here.
-  if has_history "$file"; then
-    rmdir "$lock_dir" 2>/dev/null
-    return 0
-  fi
-
-  local now tmp
-  now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-  tmp=$(mktemp) || { rmdir "$lock_dir" 2>/dev/null; return 1; }
-  # mktemp creates the file 0600, and mv would carry that onto the story.
-  # Copying the original first keeps its mode; the redirect below only
-  # truncates and refills it.
-  if ! cp -p "$file" "$tmp"; then
-    rm -f "$tmp"
-    rmdir "$lock_dir" 2>/dev/null
-    echo "Failed to prepare a copy of $file — left unchanged." >&2
-    return 1
-  fi
-
-  # The entry goes through the environment, not awk -v, which would run it
-  # through awk's escape processing. The file is held in memory because the
-  # insertion point (the closing `---` just above the footer) is only known
-  # once the whole file has been read.
-  if ! HISTORY_ENTRY="- ${now} — History section added by /local-backlog:fix (story predates it)" awk '
-    { line[NR] = $0 }
-    /^> Generated with/ { footer = NR }
-    END {
-      at = 0
-      if (footer) {
-        # The closing `---` is the nearest non-blank line above the footer; any
-        # other `---` (the one under the metadata table, a rule inside the
-        # body) is not the end of the story and is never used.
-        i = footer - 1
-        while (i >= 1 && line[i] == "") i--
-        at = (i >= 1 && line[i] == "---") ? i : footer
-      }
-      for (n = 1; n <= NR; n++) {
-        if (n == at) emit_section(at > 1 && line[at - 1] != "")
-        print line[n]
-      }
-      # No footer to anchor on: append at the end of the file.
-      if (!at) emit_section(NR > 0 && line[NR] != "")
-    }
-    function emit_section(need_blank) {
-      if (need_blank) print ""
-      print "## History"
-      print ""
-      print ENVIRON["HISTORY_ENTRY"]
-      print ""
-    }
-  ' "$file" > "$tmp"; then
-    rm -f "$tmp"
-    rmdir "$lock_dir" 2>/dev/null
-    echo "Failed to rewrite $file — left unchanged." >&2
-    return 1
-  fi
-
-  # Checked too, so an unwritable story is reported instead of looking repaired.
-  if ! mv "$tmp" "$file"; then
-    rm -f "$tmp"
-    rmdir "$lock_dir" 2>/dev/null
-    echo "Failed to write $file — left unchanged." >&2
-    return 1
-  fi
-
-  rmdir "$lock_dir" 2>/dev/null
-  return 0
+  rewrite_story "$file"
+  local rc=$?
+  release
+  return "$rc"
 }
 
 STATUS=0
@@ -144,6 +172,14 @@ for file in "$DIR"/*.md; do
   [[ -e "$file" ]] || continue
   base="$(basename "$file")"
   [[ "$base" =~ ^[A-Z]{2,6}-[0-9]{4}- ]] || continue
+
+  # A rewrite replaces the file, so a symlink would be swapped for a regular
+  # file holding its target's content — copying whatever it points at into the
+  # backlog. Stories are plain files; leave a link for a human to look at.
+  if [[ -L "$file" ]]; then
+    echo "Skipping symlink: $file" >&2
+    continue
+  fi
 
   has_history "$file" && continue
 

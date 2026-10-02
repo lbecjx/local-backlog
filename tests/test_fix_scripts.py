@@ -14,7 +14,10 @@ import json
 import os
 import re
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 LIST_SCRIPT = REPO_ROOT / "skills" / "fix" / "scripts" / "list-unresolved-done.sh"
@@ -372,12 +375,14 @@ def test_repair_missing_directory_fails(tmp_path):
     assert "No such directory" in result.stderr
 
 
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory permissions")
 def test_repair_unwritable_story_is_reported_and_left_unchanged(tmp_path):
     backlog = scratch_backlog(tmp_path)
     story = write_legacy(backlog)
     before = story.read_text()
-    # A read-only folder blocks the lock and the replace alike; the story must
-    # come out untouched with a non-zero exit, not look repaired.
+    # A read-only folder refuses the lock directory, so the repair gives up
+    # after its wait; the story must come out untouched with a non-zero exit,
+    # not look repaired.
     backlog.chmod(0o555)
     try:
         result = repair(backlog, "--write")
@@ -385,8 +390,60 @@ def test_repair_unwritable_story_is_reported_and_left_unchanged(tmp_path):
         backlog.chmod(0o755)
 
     assert result.returncode == 1
+    assert "Could not acquire lock" in result.stderr
     assert result.stdout == ""
     assert story.read_text() == before
+
+
+def test_repair_leaves_no_lock_or_temp_file_behind(tmp_path):
+    backlog = scratch_backlog(tmp_path)
+    write_legacy(backlog)
+
+    repair(backlog, "--write")
+
+    assert sorted(p.name for p in backlog.iterdir()) == ["FX-0001-legacy.md"]
+
+
+def test_repair_skips_a_symlink_instead_of_replacing_it(tmp_path):
+    backlog = scratch_backlog(tmp_path)
+    secret = tmp_path / "secret.txt"
+    secret.write_text("not a story\n")
+    link = backlog / "FX-0001-link.md"
+    link.symlink_to(secret)
+
+    result = repair(backlog, "--write")
+
+    assert result.returncode == 0
+    assert result.stdout == ""
+    assert "Skipping symlink" in result.stderr
+    assert link.is_symlink()
+    assert secret.read_text() == "not a story\n"
+
+
+def test_repair_anchors_a_crlf_story_before_its_closing_rule(tmp_path):
+    backlog = scratch_backlog(tmp_path)
+    crlf = LEGACY_STORY.format(code="FX-0001").replace("\n", "\r\n")
+    story = backlog / "FX-0001-crlf.md"
+    story.write_bytes(crlf.encode())
+
+    repair(backlog, "--write")
+
+    after = story.read_bytes().decode()
+    assert after.rindex("- [ ] Done") < after.index("## History") < after.rindex("\n---\r\n")
+    # Every original line keeps its CRLF; only the inserted lines are LF.
+    assert after.count("\r\n") == crlf.count("\r\n")
+
+
+def test_concurrent_repairs_add_the_section_once(tmp_path):
+    backlog = scratch_backlog(tmp_path)
+    story = write_legacy(backlog)
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(lambda _: repair(backlog, "--write"), range(4)))
+
+    assert all(r.returncode == 0 for r in results)
+    assert story.read_text().count("## History") == 1
+    assert sorted(p.name for p in backlog.iterdir()) == ["FX-0001-legacy.md"]
 
 
 def test_update_status_refuses_a_legacy_story_until_it_is_repaired(tmp_path):
