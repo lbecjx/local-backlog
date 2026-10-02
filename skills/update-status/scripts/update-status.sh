@@ -105,7 +105,17 @@ until mkdir "$LOCK_DIR" 2>/dev/null; do
     exit 1
   fi
 done
-trap 'rmdir "$LOCK_DIR" 2>/dev/null' EXIT
+# One cleanup for everything this run holds — the lock and the temp file below —
+# on every exit path and on INT/TERM. A leaked `<story>.lock` makes every later
+# update of that story wait out the 10s timeout above until someone removes it.
+CUR_TMP=""
+release() {
+  [[ -n "$CUR_TMP" ]] && rm -f "$CUR_TMP"
+  rmdir "$LOCK_DIR" 2>/dev/null
+}
+trap release EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 OLD_STATUS=$(grep -m1 '^| \*\*Status\*\* |' "$STORY_FILE" | sed -E 's/^\| \*\*Status\*\* \| *(.*[^ ]) *\|$/\1/')
 # Stripped in two steps (not the single `(.*[^ ])` capture the Status read uses)
@@ -224,7 +234,22 @@ if [[ "$BACKFILL" == "1" && -n "$OLD_NOTE" ]]; then
   EFFECTIVE_NOTE="$OLD_NOTE"
 fi
 
-TMP_FILE=$(mktemp)
+# The temp file lives next to the story, so the final `mv` is a same-filesystem
+# rename (atomic — a reader never sees a partial story), not a copy out of
+# $TMPDIR. The story is copied into it first, with `cp -p`, so the rewritten file
+# keeps the original's mode: `mktemp` alone creates 0600 and `mv` would carry that
+# over. A co-writer in this folder could pre-empt the temp name with a symlink;
+# the backlog is the author's own folder, and the atomic rename is worth that.
+# The name does not end in `.md`, so no `*.md` glob (this plugin's, the viewer's) sees it.
+if ! TMP_FILE=$(mktemp "${STORY_FILE}.XXXXXX"); then
+  echo "Failed to create a temp file next to $STORY_FILE — left unchanged." >&2
+  exit 1
+fi
+CUR_TMP="$TMP_FILE"
+if ! cp -p "$STORY_FILE" "$TMP_FILE"; then
+  echo "Failed to prepare a copy of $STORY_FILE — left unchanged." >&2
+  exit 1
+fi
 
 # The values are passed through the environment, not awk -v: -v runs each
 # through awk's own escape processing, so a backslash in a note (e.g. a Windows
@@ -296,6 +321,7 @@ if ! mv "$TMP_FILE" "$STORY_FILE"; then
   echo "Failed to write $STORY_FILE — left unchanged." >&2
   exit 1
 fi
+CUR_TMP=""
 
 if [[ "$BACKFILL" == "1" ]]; then
   echo "Resolution: ${RESOLUTION} (backfilled; Status unchanged: ${NEW_STATUS})"
