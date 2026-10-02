@@ -40,7 +40,9 @@ respects (see its own "Notes" section). If the viewer's actual *code* is
 broken (not the data it's reading), that's a bug report for `backlog-viewer`,
 not something this skill patches around.
 
-This skill never edits a story's body content — only its metadata table.
+This skill never edits a story's existing body content — only its metadata
+table, plus one addition: a missing `## History` section (item 9 below), which
+it creates without touching any line already in the file.
 
 ## Execution
 
@@ -120,6 +122,13 @@ Don't start guessing before you know what "broken" means here.
    `{ "code": … }` objects; the canonical shape is a bare code string, the same
    as `planner`. Run `scripts/migrate-board-archive.sh <local-backlog-dir>`;
    every line it prints is such an entry. Repair in Step 3.
+9. **Is any story missing its `## History` section?** (legacy data) A story
+   created before that section existed has none, and
+   `/local-backlog:update-status` refuses to move its `Status` at all — it has
+   nowhere to log the change. This is not item 6: that one checks the metadata
+   table's rows (`Resolution`/`Note`), while a story can have every row and
+   still lack the section. Run `scripts/repair-missing-history.sh
+   <local-backlog-dir>`; every path it prints is such a story. Repair in Step 3.
 
 ### Step 3: Handle each finding
 
@@ -152,6 +161,17 @@ Don't start guessing before you know what "broken" means here.
   gets written again keeps showing its archived stories in Backlog until this
   migrates it. The script is idempotent and prints nothing once the board is
   canonical; never migrate a board by hand.
+- **Story with no `## History` section (legacy)** → show the exact list from
+  `repair-missing-history.sh`'s dry run and offer to add the section to each;
+  apply with `scripts/repair-missing-history.sh --write <local-backlog-dir>`
+  only after confirmation. The script adds `## History` just above the story's
+  closing rule, with a single entry stamped from a real clock saying the
+  section was added because the story predates it. It rebuilds nothing: no
+  `Status: <old> → <new>` line is invented, `Created` is not touched, and every
+  other line of the file stays as it was. After that, `update-status` works on
+  the story normally. A story that already has the heading, with or without
+  entries, is left alone, and the script prints nothing once every story has
+  the section (idempotent). Never add the section by hand.
 - **Ambiguous** (a status value that isn't a known state and isn't clearly a
   deliberate custom one either, a field that doesn't map cleanly to the
   current schema, anything you'd have to guess at) → ask the human what they
