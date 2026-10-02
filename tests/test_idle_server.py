@@ -26,6 +26,8 @@ import pytest
 
 from conftest import post, IDLE_SERVER
 
+UPDATE_STATUS = IDLE_SERVER.parent.parent.parent / "update-status" / "scripts" / "update-status.sh"
+
 
 class TestStatusEndpoint:
     def test_valid_status_change(self, server):
@@ -467,10 +469,6 @@ class TestUpdateStatusLock:
         "# LK-0001\n\n| **Status** | Not Started |\n\n---\n## History\n- created\n\n---\n"
     )
 
-    @staticmethod
-    def _script():
-        return IDLE_SERVER.parent.parent.parent / "update-status" / "scripts" / "update-status.sh"
-
     def _story(self, tmp_path, text=None):
         backlog = tmp_path / "local-backlog"
         backlog.mkdir()
@@ -478,11 +476,27 @@ class TestUpdateStatusLock:
         story.write_text(self.STORY if text is None else text)
         return backlog, story
 
+    @staticmethod
+    def _shim_awk(tmp_path, body):
+        """A stand-in `awk` first on PATH, so a test can stall or fail the write step."""
+        shim_dir = tmp_path / "shim"
+        shim_dir.mkdir()
+        shim = shim_dir / "awk"
+        shim.write_text(f"#!/bin/bash\n{body}\n")
+        shim.chmod(0o755)
+        scratch_tmp = tmp_path / "tmp"
+        scratch_tmp.mkdir()
+        return {**os.environ, "PATH": f"{shim_dir}:{os.environ['PATH']}", "TMPDIR": str(scratch_tmp)}
+
+    @staticmethod
+    def _names(directory):
+        return sorted(p.name for p in directory.iterdir())
+
     def test_the_stories_file_mode_is_kept(self, tmp_path):
-        backlog, story = self._story(tmp_path)
+        _, story = self._story(tmp_path)
         story.chmod(0o644)
 
-        result = subprocess.run([str(self._script()), str(story), "In Progress"], capture_output=True, text=True)
+        result = subprocess.run([str(UPDATE_STATUS), str(story), "In Progress"], capture_output=True, text=True)
 
         assert result.returncode == 0, result.stderr
         assert story.stat().st_mode & 0o777 == 0o644
@@ -490,9 +504,10 @@ class TestUpdateStatusLock:
     def test_nothing_is_left_behind_after_a_successful_run(self, tmp_path):
         backlog, story = self._story(tmp_path)
 
-        subprocess.run([str(self._script()), str(story), "In Progress"], capture_output=True, text=True)
+        result = subprocess.run([str(UPDATE_STATUS), str(story), "In Progress"], capture_output=True, text=True)
 
-        assert sorted(p.name for p in backlog.iterdir()) == [story.name]
+        assert result.returncode == 0, result.stderr
+        assert self._names(backlog) == [story.name]
 
     @pytest.mark.parametrize(
         "args, text, code",
@@ -507,30 +522,47 @@ class TestUpdateStatusLock:
         backlog, story = self._story(tmp_path, text)
         before = story.read_text()
 
-        result = subprocess.run([str(self._script()), str(story), *args], capture_output=True, text=True)
+        result = subprocess.run([str(UPDATE_STATUS), str(story), *args], capture_output=True, text=True)
 
         assert result.returncode == code
         assert story.read_text() == before
-        assert sorted(p.name for p in backlog.iterdir()) == [story.name]
+        assert self._names(backlog) == [story.name]
+
+    def test_nothing_is_left_behind_after_a_failed_rewrite(self, tmp_path):
+        backlog, story = self._story(tmp_path)
+        before = story.read_text()
+        env = self._shim_awk(tmp_path, "exit 1")
+
+        result = subprocess.run([str(UPDATE_STATUS), str(story), "In Progress"], env=env, capture_output=True, text=True)
+
+        assert result.returncode == 1
+        assert "Failed to rewrite" in result.stderr
+        assert story.read_text() == before
+        assert self._names(backlog) == [story.name]
+
+    def _stalled_run(self, tmp_path, backlog, story, hold):
+        """Start an update whose write step reports in, then holds for `hold` seconds."""
+        sentinel = tmp_path / "write-step-reached"
+        real_awk = shutil.which("awk")
+        env = self._shim_awk(tmp_path, f'touch "{sentinel}"\nsleep {hold}\nexec {real_awk} "$@"')
+        proc = subprocess.Popen(
+            [str(UPDATE_STATUS), str(story), "In Progress"], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
+        deadline = time.monotonic() + 10
+        while not sentinel.exists() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert sentinel.exists(), "the run never reached the write step"
+        return proc
 
     def test_an_interrupt_mid_write_leaves_no_lock_or_temp_file(self, tmp_path):
         backlog, story = self._story(tmp_path)
         before = story.read_text()
-        # A shim awk that stalls, so the run is interrupted after the lock is
-        # taken and the temp file exists but before the story is replaced.
-        shim_dir = tmp_path / "shim"
-        shim_dir.mkdir()
-        shim = shim_dir / "awk"
-        shim.write_text(f'#!/bin/bash\nsleep 5\nexec {shutil.which("awk")} "$@"\n')
-        shim.chmod(0o755)
-        env = {**os.environ, "PATH": f"{shim_dir}:{os.environ['PATH']}"}
-
-        proc = subprocess.Popen([str(self._script()), str(story), "In Progress"], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        proc = self._stalled_run(tmp_path, backlog, story, hold=2)
         try:
-            deadline = time.time() + 5
-            while time.time() < deadline and len(list(backlog.iterdir())) < 3:
-                time.sleep(0.05)
-            assert len(list(backlog.iterdir())) == 3, "the run never reached the write step"
+            # Mid-write the folder holds the story, the lock directory and the temp
+            # file — and the temp file's name is not one a `*.md` glob would match.
+            assert len(self._names(backlog)) == 3
+            assert list(backlog.glob("*.md")) == [story]
             proc.terminate()
             proc.wait(timeout=10)
         finally:
@@ -539,7 +571,26 @@ class TestUpdateStatusLock:
 
         assert proc.returncode == 143
         assert story.read_text() == before
-        assert sorted(p.name for p in backlog.iterdir()) == [story.name]
+        assert self._names(backlog) == [story.name]
+
+    def test_a_shared_folder_keeps_the_temp_file_out_of_it(self, tmp_path):
+        backlog, story = self._story(tmp_path)
+        story.chmod(0o644)
+        backlog.chmod(0o775)  # writable by the group: someone else could swap a temp file in it
+        proc = self._stalled_run(tmp_path, backlog, story, hold=1)
+        try:
+            # Only the story and the lock are in the folder; the temp file went to $TMPDIR.
+            assert self._names(backlog) == [story.name, f"{story.name}.lock"]
+            assert len(self._names(tmp_path / "tmp")) == 1
+            assert proc.wait(timeout=10) == 0
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+
+        assert "| **Status** | In Progress |" in story.read_text()
+        assert story.stat().st_mode & 0o777 == 0o644
+        assert self._names(backlog) == [story.name]
+        assert self._names(tmp_path / "tmp") == []
 
 
 class TestServerConfiguration:
@@ -643,6 +694,7 @@ class TestUpdateStatusResolution:
         finally:
             subprocess.run(["chflags", "nouchg", str(story)], check=True)
         assert story.read_text() == before
+        assert sorted(p.name for p in story.parent.iterdir()) == [story.name]
 
     def test_backfill_fills_an_empty_resolution_without_a_history_line(self, tmp_path):
         # A legacy `Status: Done` story (predating the Resolution field): asking

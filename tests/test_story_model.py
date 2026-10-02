@@ -22,6 +22,8 @@ REPAIR = REPO_ROOT / "skills" / "fix" / "scripts" / "repair-missing-history.sh"
 UPDATE_STATUS = REPO_ROOT / "skills" / "update-status" / "scripts" / "update-status.sh"
 
 ISO = r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z"
+AT = "<at>"
+TRANSITION_MARKER = " — Status: "
 
 
 def history_section():
@@ -33,18 +35,22 @@ def non_transition(name):
 
 
 def as_regex(line):
-    return re.compile("^" + re.escape(line).replace(re.escape("<at>"), ISO) + "$")
+    """A pattern for a model line: its literal text, with the `<at>` placeholder as an ISO UTC stamp."""
+    before, after = line.split(AT)
+    return re.compile(f"^{re.escape(before)}{ISO}{re.escape(after)}$")
 
 
 def test_the_model_lists_exactly_the_non_transition_lines_the_plugin_writes():
     assert [e["name"] for e in history_section()["nonTransitionLines"]] == ["created", "history-section-added"]
 
 
+def test_the_transition_line_carries_the_marker():
+    assert TRANSITION_MARKER in history_section()["line"]
+
+
 def test_no_non_transition_line_is_shaped_like_a_transition():
-    marker = " — Status: "
     for entry in history_section()["nonTransitionLines"]:
-        assert marker not in entry["line"].replace("<at>", "", 1)
-    assert marker in history_section()["line"]
+        assert TRANSITION_MARKER not in entry["line"].replace(AT, "", 1)
 
 
 def test_transitions_still_require_from_and_to():
@@ -53,12 +59,12 @@ def test_transitions_still_require_from_and_to():
 
 
 def test_the_template_carries_the_created_line_the_model_describes():
-    line = non_transition("created")["line"].replace("<at>", "YYYY-MM-DDTHH:MM:SSZ")
+    line = non_transition("created")["line"].replace(AT, "YYYY-MM-DDTHH:MM:SSZ")
     assert line in TEMPLATE.read_text()
 
 
 def test_the_template_names_the_line_the_fix_script_writes():
-    line = non_transition("history-section-added")["line"].split("— ", 1)[1]
+    line = non_transition("history-section-added")["line"].removeprefix(f"- {AT} — ")
     assert line in TEMPLATE.read_text()
 
 
@@ -84,6 +90,7 @@ def test_update_status_emits_a_transition_not_a_non_transition_line(tmp_path):
     subprocess.run([str(UPDATE_STATUS), str(story), "In Progress"], capture_output=True, text=True, check=True)
 
     lines = [line for line in story.read_text().splitlines() if line.startswith("- ")]
+    assert len(lines) == 2
     created, transition = lines
     assert as_regex(non_transition("created")["line"]).match(created)
     assert re.match(rf"^- {ISO} — Status: Not Started → In Progress$", transition)
