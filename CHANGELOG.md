@@ -14,6 +14,11 @@ All notable changes to this plugin are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/), versioning follows
 [Semantic Versioning](https://semver.org/).
 
+## 1.9.0
+
+- `/local-backlog:fix` now detects stories missing a `## History` section —
+  those created before it existed — and adds it after a dry run and confirmation.
+
 ## 1.8.0
 
 - The board's `archive` list now stores bare code strings (`["LB-0001"]`),
