@@ -11,12 +11,18 @@
 # invokes it — not a mocked helper.
 
 import json
+import os
+import re
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 LIST_SCRIPT = REPO_ROOT / "skills" / "fix" / "scripts" / "list-unresolved-done.sh"
 MIGRATE_SCRIPT = REPO_ROOT / "skills" / "fix" / "scripts" / "migrate-board-archive.sh"
+REPAIR_SCRIPT = REPO_ROOT / "skills" / "fix" / "scripts" / "repair-missing-history.sh"
 UPDATE_STATUS = REPO_ROOT / "skills" / "update-status" / "scripts" / "update-status.sh"
 
 STORY = """# {code} · test story
@@ -178,3 +184,283 @@ def test_migrate_corrupt_board_fails_without_touching_it(tmp_path):
     assert result.returncode == 1
     assert "invalid JSON" in result.stderr
     assert (backlog / ".backlog-board.json").read_text() == "{not json"
+
+
+# A story as it was before `## History` (and the Resolution/Note rows) existed:
+# the metadata table is the old shape and the body runs straight into the
+# closing rule and footer.
+LEGACY_STORY = """# {code} · legacy story
+
+| Field | Value |
+|---|---|
+| **Code** | {code} |
+| **Type** | Story |
+| **Priority** | Low |
+| **Status** | Not Started |
+| **Labels** | test |
+| **Created** | 2026-01-01 |
+| **Updated** | 2026-01-01 |
+
+---
+
+## Description
+
+Body text.
+
+---
+
+A rule inside the body, which is not the story's own end.
+
+## Definition of Done
+
+- [ ] Done
+
+---
+
+> Generated with `/local-backlog:create-story`.
+"""
+
+ENTRY = re.compile(r"^- \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ — History section added by /local-backlog:fix \(story predates it\)$")
+
+
+def write_legacy(backlog, code="FX-0001", text=None):
+    path = backlog / f"{code}-legacy.md"
+    path.write_text(LEGACY_STORY.format(code=code) if text is None else text)
+    return path
+
+
+def repair(backlog, *args):
+    return subprocess.run([str(REPAIR_SCRIPT), *args, str(backlog)], capture_output=True, text=True)
+
+
+def scratch_backlog(tmp_path):
+    backlog = tmp_path / "local-backlog"
+    backlog.mkdir()
+    return backlog
+
+
+def test_repair_dry_run_lists_the_story_and_touches_nothing(tmp_path):
+    backlog = scratch_backlog(tmp_path)
+    story = write_legacy(backlog)
+    before = story.read_text()
+
+    result = repair(backlog)
+
+    assert result.returncode == 0
+    assert result.stdout.split() == [str(story)]
+    assert story.read_text() == before
+
+
+def test_repair_adds_only_the_new_section_before_the_closing_rule(tmp_path):
+    backlog = scratch_backlog(tmp_path)
+    story = write_legacy(backlog)
+    before = story.read_text()
+
+    result = repair(backlog, "--write")
+
+    assert result.returncode == 0
+    assert result.stdout.split() == [str(story)]
+    after = story.read_text()
+    closing = before.rindex("\n---\n\n> Generated") + 1
+    # Everything before the closing rule and everything from it on is the
+    # original, byte for byte; only the section lands between them.
+    assert after.startswith(before[:closing])
+    assert after.endswith(before[closing:])
+    section = after[closing : len(after) - len(before[closing:])].split("\n")
+    assert section[0] == "## History"
+    assert section[1] == ""
+    assert ENTRY.match(section[2])
+    assert section[3:] == ["", ""]
+    # Created is untouched and no transition was invented.
+    assert "| **Created** | 2026-01-01 |" in after
+    assert "Status:" not in after
+
+
+def test_repair_covers_a_story_with_no_history_and_no_resolution_rows(tmp_path):
+    backlog = scratch_backlog(tmp_path)
+    story = write_legacy(backlog)
+    assert "**Resolution**" not in story.read_text()
+
+    repair(backlog, "--write")
+
+    assert "## History" in story.read_text()
+
+
+def test_repair_leaves_a_story_that_already_has_history_untouched(tmp_path):
+    backlog = scratch_backlog(tmp_path)
+    story = write_story(backlog, "FX-0001", "Not Started")
+    before = story.read_text()
+
+    result = repair(backlog, "--write")
+
+    assert result.returncode == 0
+    assert result.stdout == ""
+    assert story.read_text() == before
+
+
+def test_repair_leaves_an_empty_history_section_untouched(tmp_path):
+    backlog = scratch_backlog(tmp_path)
+    text = LEGACY_STORY.format(code="FX-0001").replace("---\n\n> Generated", "## History\n\n---\n\n> Generated")
+    story = write_legacy(backlog, text=text)
+
+    result = repair(backlog, "--write")
+
+    assert result.returncode == 0
+    assert result.stdout == ""
+    assert story.read_text() == text
+
+
+def test_repair_is_idempotent(tmp_path):
+    backlog = scratch_backlog(tmp_path)
+    story = write_legacy(backlog)
+
+    repair(backlog, "--write")
+    once = story.read_text()
+    second = repair(backlog, "--write")
+
+    assert second.returncode == 0
+    assert second.stdout == ""
+    assert story.read_text() == once
+    assert once.count("## History") == 1
+
+
+def test_repair_appends_at_the_end_when_there_is_no_footer(tmp_path):
+    backlog = scratch_backlog(tmp_path)
+    text = "# FX-0001 · bare\n\n| Field | Value |\n|---|---|\n| **Code** | FX-0001 |\n\n---\n\nbody\n"
+    story = write_legacy(backlog, text=text)
+
+    repair(backlog, "--write")
+
+    after = story.read_text()
+    assert after.startswith(text)
+    assert after[len(text):].split("\n")[:3] == ["", "## History", ""]
+    assert ENTRY.match(after.splitlines()[-2])
+
+
+def test_repair_adds_a_blank_line_when_the_closing_rule_hugs_the_body(tmp_path):
+    backlog = scratch_backlog(tmp_path)
+    text = "# FX-0001 · tight\n\n- [ ] Done\n---\n\n> Generated with `/local-backlog:create-story`.\n"
+    story = write_legacy(backlog, text=text)
+
+    repair(backlog, "--write")
+
+    assert story.read_text().startswith("# FX-0001 · tight\n\n- [ ] Done\n\n## History\n\n- ")
+
+
+def test_repair_keeps_the_stories_file_mode(tmp_path):
+    backlog = scratch_backlog(tmp_path)
+    story = write_legacy(backlog)
+    story.chmod(0o644)
+
+    repair(backlog, "--write")
+
+    assert story.stat().st_mode & 0o777 == 0o644
+
+
+def test_repair_only_touches_story_files(tmp_path):
+    backlog = scratch_backlog(tmp_path)
+    notes = backlog / "notes.md"
+    notes.write_text("# not a story\n")
+
+    result = repair(backlog, "--write")
+
+    assert result.returncode == 0
+    assert result.stdout == ""
+    assert notes.read_text() == "# not a story\n"
+
+
+def test_repair_missing_directory_fails(tmp_path):
+    result = subprocess.run([str(REPAIR_SCRIPT), str(tmp_path / "nope")], capture_output=True, text=True)
+    assert result.returncode == 1
+    assert "No such directory" in result.stderr
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory permissions")
+def test_repair_unwritable_story_is_reported_and_left_unchanged(tmp_path):
+    backlog = scratch_backlog(tmp_path)
+    story = write_legacy(backlog)
+    before = story.read_text()
+    # A read-only folder refuses the lock directory, so the repair gives up
+    # after its wait; the story must come out untouched with a non-zero exit,
+    # not look repaired.
+    backlog.chmod(0o555)
+    try:
+        result = repair(backlog, "--write")
+    finally:
+        backlog.chmod(0o755)
+
+    assert result.returncode == 1
+    assert "Could not acquire lock" in result.stderr
+    assert result.stdout == ""
+    assert story.read_text() == before
+
+
+def test_repair_leaves_no_lock_or_temp_file_behind(tmp_path):
+    backlog = scratch_backlog(tmp_path)
+    write_legacy(backlog)
+
+    repair(backlog, "--write")
+
+    assert sorted(p.name for p in backlog.iterdir()) == ["FX-0001-legacy.md"]
+
+
+def test_repair_skips_a_symlink_instead_of_replacing_it(tmp_path):
+    backlog = scratch_backlog(tmp_path)
+    secret = tmp_path / "secret.txt"
+    secret.write_text("not a story\n")
+    link = backlog / "FX-0001-link.md"
+    link.symlink_to(secret)
+
+    result = repair(backlog, "--write")
+
+    assert result.returncode == 0
+    assert result.stdout == ""
+    assert "Skipping symlink" in result.stderr
+    assert link.is_symlink()
+    assert secret.read_text() == "not a story\n"
+
+
+def test_repair_anchors_a_crlf_story_before_its_closing_rule(tmp_path):
+    backlog = scratch_backlog(tmp_path)
+    crlf = LEGACY_STORY.format(code="FX-0001").replace("\n", "\r\n")
+    story = backlog / "FX-0001-crlf.md"
+    story.write_bytes(crlf.encode())
+
+    repair(backlog, "--write")
+
+    after = story.read_bytes().decode()
+    assert after.rindex("- [ ] Done") < after.index("## History") < after.rindex("\n---\r\n")
+    # Every original line keeps its CRLF; only the inserted lines are LF.
+    assert after.count("\r\n") == crlf.count("\r\n")
+
+
+def test_concurrent_repairs_add_the_section_once(tmp_path):
+    backlog = scratch_backlog(tmp_path)
+    story = write_legacy(backlog)
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(lambda _: repair(backlog, "--write"), range(4)))
+
+    assert all(r.returncode == 0 for r in results)
+    assert story.read_text().count("## History") == 1
+    assert sorted(p.name for p in backlog.iterdir()) == ["FX-0001-legacy.md"]
+
+
+def test_update_status_refuses_a_legacy_story_until_it_is_repaired(tmp_path):
+    backlog = scratch_backlog(tmp_path)
+    story = write_legacy(backlog)
+
+    def move(status):
+        return subprocess.run([str(UPDATE_STATUS), str(story), status], capture_output=True, text=True, cwd=tmp_path)
+
+    refused = move("In Progress")
+    assert refused.returncode == 1
+    assert "No '## History' section" in refused.stderr
+
+    repair(backlog, "--write")
+    moved = move("In Progress")
+
+    assert moved.returncode == 0, moved.stderr
+    lines = story.read_text().splitlines()
+    assert ENTRY.match(lines[lines.index("## History") + 2])
+    assert re.match(r"^- \S+ — Status: Not Started → In Progress$", lines[lines.index("## History") + 3])
