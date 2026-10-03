@@ -19,7 +19,7 @@ eye. See "Changing this file."
 
 # lbecjx Plugins Ecosystem
 
-**Version:** 0.0.4 — **Last updated:** 2026-10-03T14:27:47Z (UTC, `date -u
+**Version:** 0.0.1 — **Last updated:** 2026-10-03T20:09:18Z (UTC, `date -u
 +%Y-%m-%dT%H:%M:%SZ`, never typed or estimated). Bump both on every
 content change (see "Changing this file"). There is no automated way to
 tell a plugin's copy is stale; **Version** is the drift check compared by
@@ -57,22 +57,63 @@ this exact file at its repo root.
 
 ## Detecting another plugin's presence
 
-There is no API for "is plugin X installed/enabled right now." The only
-practical signal is a file the other plugin is already known to leave on
-disk — a config file, a marker it writes on first use, anything stable.
-A calling skill states, in its own "ECOSYSTEM SECTION," which specific
-file it checks for and which specific plugin that file indicates. If the
-marker is absent, the integration is skipped entirely and the skill
-continues exactly as it would standalone — no warning, no degraded mode,
-nothing left half-done.
+There is no API for "is plugin X installed/enabled right now." Two
+generic checks exist instead — pick based on what the integration
+actually needs to know:
 
-This file never names a specific plugin, a specific marker file, or a
-specific contract — doing so would make this copy diverge from what every
-other `lbecjx` plugin needs, defeating the point of it being identical
-everywhere. All of that — which plugins exist, what each one's presence
-marker is, what contracts exist between which plugins, what each one does
-and why — lives only in the calling skill's own "ECOSYSTEM SECTION," in
-whichever plugin actually implements it.
+1. **Is it installed in this session?** Check whether the other plugin's
+   slash commands/skills appear in the list of what's currently
+   available (e.g. a skill/tool search for its name). Tells you it's
+   enabled right now; says nothing about whether this *project* uses it.
+2. **Does this project actually use it?** Check for a stable file or
+   folder the other plugin is known to leave in a project once it's been
+   used there — a config file, a marker written on first use, anything
+   that doesn't disappear between sessions. This is almost always the
+   right check for a contract, since "installed but never used in this
+   project" should behave the same as "not installed."
+
+Either way, the calling skill states — in its own "ECOSYSTEM SECTION,"
+never here — which specific check it uses and which specific plugin it's
+checking for. If the check comes back negative, the integration is
+skipped entirely and the skill continues exactly as it would standalone —
+no warning, no degraded mode, nothing left half-done.
+
+**Markers (check 2), one row per plugin in the ecosystem.** This table is
+the same in every plugin's copy of this file. Adding a plugin to the
+ecosystem means adding its row here, in every copy, in the same sitting
+(see "Changing this file").
+
+| Plugin | Marker — exists at the repo root when the project uses it |
+|---|---|
+| `local-backlog` | `local-backlog/.backlog-config.json` |
+| `workflow-dev` | `.workflow-dev/context/REPO.md` |
+
+This file is documentation only. It holds no rule about what any skill
+does with a detection result — those rules live only in the calling
+skill's own "ECOSYSTEM SECTION."
+
+## How a skill declares an integration
+
+Only a skill that invokes another plugin's skill declares anything. The
+convention is the same in every skill, so it can be found and checked
+mechanically:
+
+1. The skill has a section titled exactly `## ECOSYSTEM SECTION`, at the
+   end of its `SKILL.md`.
+2. The first line of that section is
+   `Full contract and how-to: see \`../../ECOSYSTEM.md\`.`
+3. Below it, `Rules:` followed by numbered rules. Each rule states the
+   trigger, the detection check (see above), the exact invocation, and
+   what to do when the check is negative (skip).
+4. The first line under the skill's `## Execution` heading is exactly
+   `Read ECOSYSTEM SECTION.` Nothing else in the skill — outside that
+   section — mentions another plugin, names its skills, or explains the
+   integration.
+5. The section holds rules to invoke another plugin's skill, nothing
+   else: no explanations, no installation advice, no marker
+   declarations.
+
+A skill with no integration has no such section and no such line.
 
 ## Changing this file
 
@@ -90,25 +131,7 @@ whichever plugin actually implements it.
 
 ## Version History
 
-- **0.0.4** (2026-10-03T14:27:47Z) — Removed the presence-marker table
-  and the Contracts section entirely — both named specific plugins
-  (`local-backlog`, `workflow-dev`), which this file must never do: it
-  has to stay byte-identical across any `lbecjx` plugin, present or
-  future, with zero edits needed to adopt a new one. Which plugins
-  exist, each one's presence marker, and what contracts exist between
-  them now live only in the calling skill's own "ECOSYSTEM SECTION."
-- **0.0.3** (2026-10-03T14:26:22Z) — Contracts section cut down to a bare
-  index (name, caller/called, status, pointer) — the previous
-  what/why/implemented-in bullets still restated rule content that
-  belongs only in the calling skill. Contract #1's rationale moved into
-  `workflow-dev:init`'s own ECOSYSTEM SECTION.
-- **0.0.2** (2026-10-03T04:25:19Z) — Contracts section rewritten as a
-  registry, not a rulebook: dropped the Trigger/Presence
-  check/Action-style bullets (they duplicated the operative rule already
-  written in the calling skill's own file) in favor of
-  participants/what/why/implemented-in/status. No behavior changed.
-- **0.0.1** (2026-10-03T04:17:46Z) — Initial contract. Philosophy,
-  presence-marker table, Contract #1 (start a story, `workflow-dev:init`
-  → `local-backlog:update-status`) documented and implemented on the
-  `workflow-dev` side. Contract #2 (close a story) specified, not yet
-  implemented on either side.
+- **0.0.1** (2026-10-03T20:09:18Z)
+  - Plugins integrate only by invoking each other's skills, with no hard dependency.
+  - Two generic presence checks and a markers table, one row per plugin.
+  - Format a skill follows to declare an integration.
