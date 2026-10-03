@@ -12,7 +12,6 @@
 # fixture — the same way a browser client (or curl, during that manual
 # pass) actually would, not a mocked handler standing in for it.
 
-import json
 import os
 import re
 import shutil
@@ -21,12 +20,58 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.request
 
 import pytest
 
-from conftest import post, IDLE_SERVER
+from conftest import post, IDLE_SERVER, Scratch, _free_port
 
 UPDATE_STATUS = IDLE_SERVER.parent.parent.parent / "update-status" / "scripts" / "update-status.sh"
+
+
+def _spawn_server(tmp_path, env):
+    """Same as conftest's `server` fixture, but with a caller-supplied env —
+    needed to shim `awk` so only the SECOND write of an archive (the Zone
+    write) fails, not the first (the Status→Done write). Caller is
+    responsible for killing the returned process."""
+    scratch = Scratch(tmp_path)
+    port = _free_port()
+    proc = subprocess.Popen(
+        [sys.executable, str(IDLE_SERVER), str(port), str(scratch.stage)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        env=env,
+    )
+    base_url = f"http://localhost:{port}"
+    for _ in range(50):
+        if proc.poll() is not None:
+            raise RuntimeError(f"server exited early:\n{proc.stdout.read()}")
+        try:
+            urllib.request.urlopen(f"{base_url}/backlog/", timeout=0.2)
+            break
+        except Exception:
+            time.sleep(0.1)
+    else:
+        proc.kill()
+        raise RuntimeError("server never came up")
+    return proc, base_url, scratch
+
+
+def _env_where_zone_writes_fail(tmp_path):
+    """A stand-in `awk` first on PATH that fails only set-zone.sh's own
+    rewrite (its awk program is the one that mentions `Zone`) and delegates
+    every other awk call — notably update-status.sh's Status/Resolution/Note
+    rewrite — to the real binary. Lets a test fail the archive's SECOND write
+    (Zone) while its first (Status→Done) still succeeds, now that there's no
+    `.backlog-board.json` left to corrupt for the same effect (LB-0014)."""
+    shim_dir = tmp_path / "shim"
+    shim_dir.mkdir()
+    shim = shim_dir / "awk"
+    real_awk = shutil.which("awk")
+    shim.write_text(f'#!/bin/bash\ncase "$1" in *Zone*) exit 1 ;; esac\nexec {real_awk} "$@"\n')
+    shim.chmod(0o755)
+    return {**os.environ, "PATH": f"{shim_dir}:{os.environ['PATH']}"}
 
 
 class TestStatusEndpoint:
@@ -166,47 +211,7 @@ class TestBoardEndpointZoneTransitions:
         scratch.write_story("QA-0001", "Not Started")
         status, body = post(base_url, "/api/board", {"code": "QA-0001", "zone": "planner"})
         assert status == 200
-        assert scratch.board()["planner"] == ["QA-0001"]
-
-    def test_board_write_migrates_legacy_archive_objects(self, server):
-        # AC #2 of LB-0012: an old board stores archive entries as {code}
-        # objects; any board write converts them to bare codes in the same
-        # pass, so an active project needs no separate migration step. An
-        # entry it doesn't recognize is left as-is, not dropped.
-        base_url, scratch = server
-        (scratch.backlog / ".backlog-board.json").write_text(
-            json.dumps({"planner": [], "archive": [{"code": "QA-0002"}, {"code": 5}]})
-        )
-        scratch.write_story("QA-0001", "Not Started")
-        status, body = post(base_url, "/api/board", {"code": "QA-0001", "zone": "planner"})
-        assert status == 200
-        assert scratch.board()["archive"] == ["QA-0002", {"code": 5}]
-        assert scratch.board()["planner"] == ["QA-0001"]
-
-    def test_board_write_survives_a_non_list_membership_field(self, server):
-        # A hand-edited board can hold a string where a list belongs; the write
-        # must not iterate its characters into a bogus membership.
-        base_url, scratch = server
-        (scratch.backlog / ".backlog-board.json").write_text(
-            json.dumps({"planner": [], "archive": "QA-0002"})
-        )
-        scratch.write_story("QA-0001", "Not Started")
-        status, body = post(base_url, "/api/board", {"code": "QA-0001", "zone": "archive", "resolution": "Done"})
-        assert status == 200
-        assert scratch.board()["archive"] == ["QA-0001"]
-
-    def test_board_write_on_a_non_object_board_returns_a_clean_error(self, server):
-        # Valid JSON that isn't an object must fail like get-board.sh does — a
-        # clean message, not a Python traceback relayed to the client — and
-        # leave the file untouched.
-        base_url, scratch = server
-        (scratch.backlog / ".backlog-board.json").write_text("[]")
-        scratch.write_story("QA-0001", "Not Started")
-        status, body = post(base_url, "/api/board", {"code": "QA-0001", "zone": "planner"})
-        assert status == 500
-        assert "must contain a JSON object" in body["error"]
-        assert "Traceback" not in body["error"]
-        assert (scratch.backlog / ".backlog-board.json").read_text() == "[]"
+        assert scratch.field("QA-0001", "Zone") == "Planner"
 
     def test_archive_without_resolution_is_rejected(self, server):
         base_url, scratch = server
@@ -214,14 +219,13 @@ class TestBoardEndpointZoneTransitions:
         status, body = post(base_url, "/api/board", {"code": "QA-0001", "zone": "archive"})
         assert status == 400
 
-    def test_archive_sets_status_done_ac9(self, server):
+    def test_archive_sets_status_done(self, server):
         base_url, scratch = server
         scratch.write_story("QA-0001", "Not Started")
         status, body = post(base_url, "/api/board", {"code": "QA-0001", "zone": "archive", "resolution": "Done"})
         assert status == 200
         assert scratch.status_of("QA-0001") == "Done"
-        archive = scratch.board()["archive"]
-        assert archive == ["QA-0001"]
+        assert scratch.field("QA-0001", "Zone") == "Archive"
 
     def test_archive_with_wont_do_maps_reason_to_story_note(self, server):
         base_url, scratch = server
@@ -233,9 +237,7 @@ class TestBoardEndpointZoneTransitions:
         )
         assert status == 200
         assert scratch.status_of("QA-0001") == "Done"
-        # The board carries only the code; the resolution and the free-text
-        # (the viewer's 'reason') belong to the story itself.
-        assert scratch.board()["archive"] == ["QA-0001"]
+        assert scratch.field("QA-0001", "Zone") == "Archive"
         assert scratch.field("QA-0001", "Resolution") == "Won't Do"
         assert scratch.field("QA-0001", "Note") == "deprioritized"
 
@@ -267,17 +269,19 @@ class TestBoardEndpointZoneTransitions:
         post(base_url, "/api/board", {"code": "QA-0001", "zone": "planner"})
         status, body = post(base_url, "/api/board", {"code": "QA-0001", "zone": "backlog"})
         assert status == 200
-        assert scratch.board()["planner"] == []
+        assert scratch.field("QA-0001", "Zone") == "Backlog"
 
-    def test_precedence_archive_wins_over_planner_ac10(self, server):
+    def test_unarchive_sets_zone_to_backlog_without_touching_status(self, server):
         base_url, scratch = server
         scratch.write_story("QA-0001", "Not Started")
-        post(base_url, "/api/board", {"code": "QA-0001", "zone": "planner"})
-        status, body = post(base_url, "/api/board", {"code": "QA-0001", "zone": "archive", "resolution": "Done"})
+        post(base_url, "/api/board", {"code": "QA-0001", "zone": "archive", "resolution": "Done"})
+        status, body = post(base_url, "/api/board", {"code": "QA-0001", "zone": "backlog"})
         assert status == 200
-        board = scratch.board()
-        assert "QA-0001" not in board["planner"]
-        assert "QA-0001" in board["archive"]
+        assert scratch.field("QA-0001", "Zone") == "Backlog"
+        # Unarchiving only ever changes Zone — Status/Resolution from the
+        # archive stay exactly as the archive left them.
+        assert scratch.status_of("QA-0001") == "Done"
+        assert scratch.field("QA-0001", "Resolution") == "Done"
 
     def test_invalid_zone_rejected(self, server):
         base_url, scratch = server
@@ -306,19 +310,6 @@ class TestBoardEndpointZoneTransitions:
             base_url, "/api/board", {"code": "QA-0001", "zone": "archive", "resolution": "Done", "reason": ""}
         )
         assert status == 200
-
-    def test_ac10_no_code_in_two_zones_at_once(self, server):
-        base_url, scratch = server
-        for code in ("QA-0001", "QA-0002", "QA-0003"):
-            scratch.write_story(code, "Not Started")
-        post(base_url, "/api/board", {"code": "QA-0001", "zone": "planner"})
-        post(base_url, "/api/board", {"code": "QA-0002", "zone": "archive", "resolution": "Done"})
-        post(base_url, "/api/board", {"code": "QA-0003", "zone": "planner"})
-        post(base_url, "/api/board", {"code": "QA-0003", "zone": "archive", "resolution": "Done"})
-        board = scratch.board()
-        planner = set(board["planner"])
-        archive = set(board["archive"])
-        assert not (planner & archive)
 
 
 class TestSecurityAndAuth:
@@ -405,14 +396,18 @@ class TestInputRobustness:
 
 
 class TestArchiveRollback:
-    def test_rollback_restores_actual_prior_status_on_board_write_failure(self, server):
-        base_url, scratch = server
-        scratch.write_story("QA-0001", "In Progress")
-        (scratch.backlog / ".backlog-board.json").write_text("{corrupt")
-        status, body = post(base_url, "/api/board", {"code": "QA-0001", "zone": "archive", "resolution": "Done"})
-        assert status == 500
-        assert "rolled back" in body["error"]
-        assert scratch.status_of("QA-0001") == "In Progress"
+    def test_rollback_restores_actual_prior_status_on_board_write_failure(self, tmp_path):
+        env = _env_where_zone_writes_fail(tmp_path)
+        proc, base_url, scratch = _spawn_server(tmp_path, env)
+        try:
+            scratch.write_story("QA-0001", "In Progress")
+            status, body = post(base_url, "/api/board", {"code": "QA-0001", "zone": "archive", "resolution": "Done"})
+            assert status == 500
+            assert "rolled back" in body["error"]
+            assert scratch.status_of("QA-0001") == "In Progress"
+        finally:
+            proc.kill()
+            proc.wait(timeout=5)
 
     def test_unrecognized_status_refused_before_touching_anything(self, server):
         # Round-2 Finding A: archiving a story whose Status isn't in the
@@ -425,31 +420,37 @@ class TestArchiveRollback:
         assert status == 409
         assert scratch.status_of("QA-0001") == "LegacyWeird"
 
-    def test_concurrent_status_write_survives_a_failed_archive_rollback(self, server, monkeypatch):
+    def test_concurrent_status_write_survives_a_failed_archive_rollback(self, tmp_path):
         # The race this whole mechanism exists to close: a concurrent
         # /api/status write landing during an archive attempt must never be
         # silently discarded by that archive's own rollback, regardless of
         # whether it landed before or after the archive's own Done write.
-        base_url, scratch = server
-        scratch.write_story("QA-0001", "In Progress")
-        (scratch.backlog / ".backlog-board.json").write_text("{corrupt")
+        env = _env_where_zone_writes_fail(tmp_path)
+        proc, base_url, scratch = _spawn_server(tmp_path, env)
+        try:
+            scratch.write_story("QA-0001", "In Progress")
 
-        results = {}
+            results = {}
 
-        def do_archive():
-            results["archive"] = post(base_url, "/api/board", {"code": "QA-0001", "zone": "archive", "resolution": "Done"})
+            def do_archive():
+                results["archive"] = post(
+                    base_url, "/api/board", {"code": "QA-0001", "zone": "archive", "resolution": "Done"}
+                )
 
-        t = threading.Thread(target=do_archive)
-        t.start()
-        time.sleep(0.05)  # let the archive request start ahead of this one
-        results["status"] = post(base_url, "/api/status", {"code": "QA-0001", "status": "Not Started"})
-        t.join(timeout=10)
+            t = threading.Thread(target=do_archive)
+            t.start()
+            time.sleep(0.05)  # let the archive request start ahead of this one
+            results["status"] = post(base_url, "/api/status", {"code": "QA-0001", "status": "Not Started"})
+            t.join(timeout=10)
 
-        assert results["status"][0] == 200
-        # Whichever way the race actually landed, the concurrent write must
-        # be the one still standing — never silently reverted to a value
-        # from before either request began.
-        assert scratch.status_of("QA-0001") == "Not Started"
+            assert results["status"][0] == 200
+            # Whichever way the race actually landed, the concurrent write must
+            # be the one still standing — never silently reverted to a value
+            # from before either request began.
+            assert scratch.status_of("QA-0001") == "Not Started"
+        finally:
+            proc.kill()
+            proc.wait(timeout=5)
 
 
 class TestUpdateStatusLock:

@@ -62,10 +62,9 @@ Don't start guessing before you know what "broken" means here.
    a. Tell the human this project is on the legacy folder name and offer to migrate.
    b. Show exactly what migration does before doing it: `git mv backlog local-backlog`
       (or a plain `mv` if the folder isn't tracked), then update every story file's
-      own footer line (`> Generated with ... To work on it: /workflow-dev:init
-      backlog/<CODE>-....md`) to say `local-backlog/` instead. Get confirmation first —
+      own footer line to say `local-backlog/` instead. Get confirmation first —
       this touches every story file, even though the edit itself is mechanical and
-      identical each time.
+      identical each time. Read ECOSYSTEM SECTION.
    c. If `.backlog-config.json` doesn't yet have a `gitignored` field (it predates that
       mechanism), ask the human the same question `/local-backlog:create-story`'s Phase 1
       would ask on first use — gitignored or tracked — rather than leaving it unset. See
@@ -117,11 +116,14 @@ Don't start guessing before you know what "broken" means here.
    that `/local-backlog:update-status` enforces on the Done transition. Run
    `scripts/list-unresolved-done.sh <local-backlog-dir>`; every path it prints
    is such a story. Repair in Step 3.
-8. **Does `.backlog-board.json` still hold legacy archive entries?** (legacy
-   data) A board written before `LB-0012` stores `archive` entries as
-   `{ "code": … }` objects; the canonical shape is a bare code string, the same
-   as `planner`. Run `scripts/migrate-board-archive.sh <local-backlog-dir>`;
-   every line it prints is such an entry. Repair in Step 3.
+8. **Is `.backlog-board.json` still present and un-migrated into each story's
+   own `Zone` field?** (legacy data) `LB-0014` moved zone membership
+   (Backlog/Planner/Archive) off that separate file and onto each story's own
+   `| **Zone** |` row; a board still on disk is a project that hasn't
+   backfilled yet. Run `scripts/migrate-zone-field.sh <local-backlog-dir>`;
+   every line it prints is a story that would get a `Zone` value (and the
+   board file would be deleted once every one of them is written). Repair in
+   Step 3.
 9. **Is any story missing its `## History` section?** (legacy data) A story
    created before that section existed has none, and
    `/local-backlog:update-status` refuses to move its `Status` at all — it has
@@ -151,16 +153,19 @@ Don't start guessing before you know what "broken" means here.
   line, since no status transition happens. Never touch a non-`Done` story;
   never overwrite a story that already has a resolution. Re-running finds
   nothing once every `Done` story is resolved (idempotent).
-- **Legacy archive entries in `.backlog-board.json` (objects instead of bare
-  codes)** → show the exact lines from `migrate-board-archive.sh`'s dry run and
-  offer to rewrite them in place; apply with
-  `scripts/migrate-board-archive.sh --write <local-backlog-dir>` only after
-  confirmation. This is a format migration, not a malfunction — but until it
-  runs, an archived story on that board reads as `backlog`: both readers
-  (`get-board.sh` and the viewer) accept bare codes only, so a board that never
-  gets written again keeps showing its archived stories in Backlog until this
-  migrates it. The script is idempotent and prints nothing once the board is
-  canonical; never migrate a board by hand.
+- **`.backlog-board.json` still present (un-migrated into `Zone`)** → show the
+  exact lines from `migrate-zone-field.sh`'s dry run (which story gets which
+  `Zone` value, and that the board file itself will be deleted) and offer to
+  apply it; apply with `scripts/migrate-zone-field.sh --write
+  <local-backlog-dir>` only after confirmation. This is a format migration,
+  not a malfunction — but until it runs, every reader (`get-zone.sh`, the
+  viewer) reads zone from the story's own row alone, so a story whose zone
+  only exists in the old board file reads as `Backlog` until this migrates
+  it. The script deletes the board file **only if every story's `Zone` write
+  succeeds** — a code with no matching story file (or more than one) is
+  reported and blocks that deletion, left for the human rather than silently
+  dropped. The script is idempotent (nothing left to do once the board file
+  is gone) and prints nothing in that state; never migrate a board by hand.
 - **Story with no `## History` section (legacy)** → show the exact list from
   `repair-missing-history.sh`'s dry run and offer to add the section to each;
   apply with `scripts/repair-missing-history.sh --write <local-backlog-dir>`
@@ -192,3 +197,14 @@ Step 2 is exhausted.
 Tell the human what was found, what was fixed (and confirmed), and anything
 still open that needs their decision. Keep it concrete — cite the actual file
 and the actual problem, not a generic "fixed some issues."
+
+## ECOSYSTEM SECTION
+
+Full contract and how-to: see `../../ECOSYSTEM.md`.
+
+References (informational text only, no automated behavior):
+- Step 2, item 1b: migrating off the legacy `backlog/` folder name rewrites
+  every story file's own footer line, whose exact current text is
+  `> Generated with ... To work on it: /workflow-dev:init
+  backlog/<CODE>-....md` — the `backlog/` path segment in that quoted line
+  is what gets rewritten to `local-backlog/`.

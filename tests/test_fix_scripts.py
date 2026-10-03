@@ -21,7 +21,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 LIST_SCRIPT = REPO_ROOT / "skills" / "fix" / "scripts" / "list-unresolved-done.sh"
-MIGRATE_SCRIPT = REPO_ROOT / "skills" / "fix" / "scripts" / "migrate-board-archive.sh"
+MIGRATE_SCRIPT = REPO_ROOT / "skills" / "fix" / "scripts" / "migrate-zone-field.sh"
 REPAIR_SCRIPT = REPO_ROOT / "skills" / "fix" / "scripts" / "repair-missing-history.sh"
 UPDATE_STATUS = REPO_ROOT / "skills" / "update-status" / "scripts" / "update-status.sh"
 
@@ -113,8 +113,16 @@ def write_board(backlog, board):
     (backlog / ".backlog-board.json").write_text(json.dumps(board))
 
 
-def read_board(backlog):
-    return json.loads((backlog / ".backlog-board.json").read_text())
+def board_path(backlog):
+    return backlog / ".backlog-board.json"
+
+
+def zone_of(backlog, code, filename=None):
+    path = backlog / (filename or f"{code}-story.md")
+    for line in path.read_text().splitlines():
+        if line.startswith("| **Zone**"):
+            return line.split("|")[2].strip()
+    return None
 
 
 def migrate(backlog, *args):
@@ -124,41 +132,107 @@ def migrate(backlog, *args):
 def test_migrate_dry_run_reports_changes_and_touches_nothing(tmp_path):
     backlog = tmp_path / "local-backlog"
     backlog.mkdir()
-    write_board(backlog, {"planner": ["FX-0009"], "archive": [{"code": "FX-0001"}, "FX-0002"]})
-    before = (backlog / ".backlog-board.json").read_text()
+    write_story(backlog, "FX-0001", "Not Started")
+    write_story(backlog, "FX-0009", "Not Started")
+    write_board(backlog, {"planner": ["FX-0009"], "archive": ["FX-0001"]})
+    before_board = board_path(backlog).read_text()
+    before_0001 = (backlog / "FX-0001-story.md").read_text()
+    before_0009 = (backlog / "FX-0009-story.md").read_text()
 
     result = migrate(backlog)
 
     assert result.returncode == 0
-    assert result.stdout.count('{"code": "FX-0001"} -> "FX-0001"') == 1
-    assert "FX-0002" not in result.stdout
-    assert (backlog / ".backlog-board.json").read_text() == before
+    assert "FX-0001-story.md: Zone -> Archive" in result.stdout
+    assert "FX-0009-story.md: Zone -> Planner" in result.stdout
+    assert board_path(backlog).read_text() == before_board
+    assert (backlog / "FX-0001-story.md").read_text() == before_0001
+    assert (backlog / "FX-0009-story.md").read_text() == before_0009
 
 
-def test_migrate_write_rewrites_legacy_entries_and_is_idempotent(tmp_path):
+def test_migrate_write_backfills_zone_and_deletes_the_board(tmp_path):
     backlog = tmp_path / "local-backlog"
     backlog.mkdir()
-    write_board(backlog, {"planner": ["FX-0009"], "archive": [{"code": "FX-0001"}, "FX-0002"]})
+    write_story(backlog, "FX-0001", "Not Started")
+    write_story(backlog, "FX-0009", "Not Started")
+    write_board(backlog, {"planner": ["FX-0009"], "archive": ["FX-0001"]})
 
     result = migrate(backlog, "--write")
+
     assert result.returncode == 0
-    assert read_board(backlog) == {"planner": ["FX-0009"], "archive": ["FX-0001", "FX-0002"]}
+    assert zone_of(backlog, "FX-0001") == "Archive"
+    assert zone_of(backlog, "FX-0009") == "Planner"
+    assert not board_path(backlog).exists()
+
+
+def test_migrate_write_is_idempotent_once_the_board_is_gone(tmp_path):
+    backlog = tmp_path / "local-backlog"
+    backlog.mkdir()
+    write_story(backlog, "FX-0001", "Not Started")
+    write_board(backlog, {"planner": [], "archive": ["FX-0001"]})
+    migrate(backlog, "--write")
 
     second = migrate(backlog, "--write")
+
     assert second.returncode == 0
     assert second.stdout == ""
-    assert read_board(backlog) == {"planner": ["FX-0009"], "archive": ["FX-0001", "FX-0002"]}
+    assert zone_of(backlog, "FX-0001") == "Archive"
 
 
-def test_migrate_preserves_unrecognized_entries(tmp_path):
+def test_migrate_archive_wins_when_a_code_is_in_both_lists(tmp_path):
     backlog = tmp_path / "local-backlog"
     backlog.mkdir()
-    write_board(backlog, {"planner": [], "archive": [{"code": "FX-0001"}, {"code": 5}, 7]})
+    write_story(backlog, "FX-0001", "Not Started")
+    write_board(backlog, {"planner": ["FX-0001"], "archive": ["FX-0001"]})
 
     result = migrate(backlog, "--write")
 
     assert result.returncode == 0
-    assert read_board(backlog)["archive"] == ["FX-0001", {"code": 5}, 7]
+    assert zone_of(backlog, "FX-0001") == "Archive"
+
+
+def test_migrate_ignores_non_string_entries_and_still_deletes_the_board(tmp_path):
+    backlog = tmp_path / "local-backlog"
+    backlog.mkdir()
+    write_story(backlog, "FX-0001", "Not Started")
+    write_board(backlog, {"planner": [], "archive": [{"code": "FX-0001"}, {"code": 5}, 7]})
+
+    # A pre-LB-0012 `{code}` object was never real membership to any reader —
+    # ignored here too, same as get-zone.sh's/the old get-board.sh's own rule.
+    result = migrate(backlog, "--write")
+
+    assert result.returncode == 0
+    assert zone_of(backlog, "FX-0001") is None
+    assert not board_path(backlog).exists()
+
+
+def test_migrate_missing_story_file_blocks_board_deletion(tmp_path):
+    backlog = tmp_path / "local-backlog"
+    backlog.mkdir()
+    write_board(backlog, {"planner": [], "archive": ["FX-0404"]})
+
+    result = migrate(backlog, "--write")
+
+    assert result.returncode == 1
+    assert "no story file found for FX-0404" in result.stderr
+    assert board_path(backlog).exists()
+
+
+def test_migrate_blocks_board_deletion_when_a_story_has_no_anchor_row(tmp_path):
+    # Found by adversarial review: a story with neither a Zone nor a Note
+    # row (predates both) makes set-zone.sh refuse — migrate-zone-field.sh
+    # must treat that as a blocked write, not delete the board anyway.
+    backlog = tmp_path / "local-backlog"
+    backlog.mkdir()
+    story = backlog / "FX-0001-story.md"
+    story.write_text("# FX-0001 · test\n\n| **Status** | Not Started |\n")
+    write_board(backlog, {"planner": [], "archive": ["FX-0001"]})
+
+    result = migrate(backlog, "--write")
+
+    assert result.returncode == 1
+    assert "failed to write Zone for FX-0001" in result.stderr
+    assert board_path(backlog).exists()
+    assert zone_of(backlog, "FX-0001") is None
 
 
 def test_migrate_missing_directory_fails(tmp_path):
@@ -177,13 +251,13 @@ def test_migrate_missing_board_is_a_silent_noop(tmp_path):
 def test_migrate_corrupt_board_fails_without_touching_it(tmp_path):
     backlog = tmp_path / "local-backlog"
     backlog.mkdir()
-    (backlog / ".backlog-board.json").write_text("{not json")
+    board_path(backlog).write_text("{not json")
 
     result = migrate(backlog, "--write")
 
     assert result.returncode == 1
     assert "invalid JSON" in result.stderr
-    assert (backlog / ".backlog-board.json").read_text() == "{not json"
+    assert board_path(backlog).read_text() == "{not json"
 
 
 # A story as it was before `## History` (and the Resolution/Note rows) existed:

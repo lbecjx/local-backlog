@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/lbecjx/local-backlog/blob/main/skills/create-story/references/story-model.json",
   "title": "local-backlog story model",
-  "description": "Single source of truth for the whole local-backlog data model: a story file's fields (types, required-when), the shape of its status-update log, AND the canonical enums those fields draw from — Status values (with their colors), the color palette, and Resolution values. Consumed by create-story (generate), update-status/set-board/idle_server (validate), open-backlog (serve to the viewer), and backlog-viewer (derive its Zod). Nothing about these types may be hand-duplicated outside this file.",
+  "description": "Single source of truth for the whole local-backlog data model: a story file's fields (types, required-when), the shape of its status-update log, AND the canonical enums those fields draw from — Status values (with their colors), the color palette, Resolution values, and Zone values. Consumed by create-story (generate), update-status/set-zone/idle_server (validate), open-backlog (serve to the viewer), and backlog-viewer (derive its Zod). Nothing about these types may be hand-duplicated outside this file.",
   "type": "object",
   "properties": {
     "code": {
@@ -31,6 +31,11 @@
     "note": {
       "type": "string",
       "description": "Optional free-text note for the current status — the SAME concept for any transition (into Done or otherwise). Empty when none."
+    },
+    "zone": {
+      "type": "string",
+      "enum": ["Backlog", "Planner", "Archive"],
+      "description": "Which of Backlog/Planner/Archive the story sits in (see x-story-file.enums.zone). Always present; defaults to Backlog."
     },
     "labels": {
       "type": "array",
@@ -87,6 +92,7 @@
         { "key": "status", "label": "Status", "required": true, "default": "Not Started" },
         { "key": "resolution", "label": "Resolution", "required": false, "requiredWhen": "status is Done", "presentWhen": "always (empty until the first Done)" },
         { "key": "note", "label": "Note", "required": false, "requiredWhen": null, "presentWhen": "always (empty when none)" },
+        { "key": "zone", "label": "Zone", "required": true, "default": "Backlog" },
         { "key": "labels", "label": "Labels", "required": true },
         { "key": "created", "label": "Created", "required": true },
         { "key": "updated", "label": "Updated", "required": true }
@@ -130,6 +136,11 @@
         "canonical": true,
         "description": "The closed set of Resolution values, shared by local-backlog and backlog-viewer.",
         "values": ["Done", "Won't Do", "Duplicate", "Cannot Reproduce"]
+      },
+      "zone": {
+        "canonical": true,
+        "description": "The closed set of Zone values — which of Backlog/Planner/Archive a story sits in. No colors: the viewer shows zones as tabs/columns, not colored badges, unlike status.",
+        "values": ["Backlog", "Planner", "Archive"]
       }
     }
   }

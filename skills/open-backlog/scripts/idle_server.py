@@ -35,14 +35,14 @@ IDLE_TIMEOUT = 30 * 60  # 30 minutes — matches the time an unattended tab is
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 UPDATE_STATUS_SCRIPT = os.path.join(SCRIPT_DIR, "..", "..", "update-status", "scripts", "update-status.sh")
-SET_BOARD_SCRIPT = os.path.join(SCRIPT_DIR, "..", "..", "update-status", "scripts", "set-board.sh")
+SET_ZONE_SCRIPT = os.path.join(SCRIPT_DIR, "..", "..", "update-status", "scripts", "set-zone.sh")
 
-# Same shape as the grep pattern in update-status/scripts/set-board.sh —
+# Same shape as the grep pattern in update-status/scripts/set-zone.sh —
 # no shared source of truth across Python and bash, so keep both in sync
 # by hand if the <PREFIX>-XXXX format ever changes.
 CODE_PATTERN = re.compile(r"^[A-Z]{2,6}-[0-9]{4}$")
 
-# Zone values, duplicated as literals in update-status/scripts/set-board.sh
+# Zone values, duplicated as literals in update-status/scripts/set-zone.sh
 # (which validates them again on its own side, independent of this server) —
 # same "keep in sync by hand" note as CODE_PATTERN above. Resolution values
 # are NOT duplicated here: they are read from the canonical story model (see
@@ -79,7 +79,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
     def _sanitize_error(self, text):
-        # update-status.sh/set-board.sh embed the full absolute path they
+        # update-status.sh/set-zone.sh embed the full absolute path they
         # were called with in their own error text (useful when read from a
         # terminal via the slash-command path). This server used to be
         # read-only, so that text never reached anyone but the person who
@@ -182,11 +182,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         # is already 'Done' — nothing to do.") when it's called with the
         # status the story already has, so calling it unconditionally here
         # — rather than checking "not already Done" ourselves — gets that
-        # for free. But the two writes (Status, then board membership)
-        # aren't one transaction: if the Status flip succeeds and the board
-        # write then fails (e.g. a corrupted .backlog-board.json), the
-        # story would be permanently stuck showing Done without ever
-        # actually reaching the Archive. old_status is captured first so
+        # for free. But the two writes (Status, then Zone) aren't one
+        # transaction: if the Status flip succeeds and the Zone write then
+        # fails, the story would be permanently stuck showing Done without
+        # ever actually reaching the Archive. old_status is captured first so
         # that exact failure can be rolled back rather than left half-done.
         old_status = self._read_status(story_file)
         # If the rollback below ever has to run, it re-sets Status to
@@ -211,7 +210,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return
 
         # The resolution (and any free-text note) belong to the story — they
-        # go through update-status.sh into its Resolution/Note rows; the board
+        # go through update-status.sh into its Resolution/Note rows; the Zone
         # write below carries only the code.
         status_args = [UPDATE_STATUS_SCRIPT, story_file, "Done", "--resolution", resolution]
         if note:
@@ -228,7 +227,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             )
             return
 
-        # If the board write below fails and a rollback is needed, the
+        # If the Zone write below fails and a rollback is needed, the
         # value to restore must be whatever update-status.sh itself just
         # read as the "from" state for THIS transition — not old_status
         # (captured earlier, before this call, purely for the pre-flight
@@ -420,7 +419,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             if note is not None and not isinstance(note, str):
                 self._send_json(400, {"error": "'note'/'reason' must be a string"})
                 return
-            board_args = [SET_BOARD_SCRIPT, story_file, zone]
+            board_args = [SET_ZONE_SCRIPT, story_file, zone]
 
             if zone == "archive":
                 self._handle_archive(story_file, board_args, resolution, note)

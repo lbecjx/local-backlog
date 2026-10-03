@@ -64,13 +64,13 @@ turn an explicit instruction into an extra round-trip.
 
 "Starting to work on a story" is two moves that otherwise live in separate
 places: set the story `In Progress`, and put it on the Planner board. Offer both
-here, so the board doesn't silently drift behind the status.
+here, so the `Zone` field doesn't silently drift behind the status.
 
 First see where the story stands: its current `Status` (Step 2 already showed
-it) and its board zone —
+it) and its `Zone` —
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/skills/update-status/scripts/get-board.sh" <path-to-story-file>
+bash "${CLAUDE_PLUGIN_ROOT}/skills/update-status/scripts/get-zone.sh" <path-to-story-file>
 ```
 
 which prints `backlog`, `planner`, or `archive`. Then **skip the question** when
@@ -96,10 +96,10 @@ Apply each accepted part with its own script — never silently:
   the target stays the story's current status — Step 6 must not write `In
   Progress` in that case. A declined status change is never applied.
 - **(b)** is a **zone-only** write that must **not** touch `Status`:
-  `bash "${CLAUDE_PLUGIN_ROOT}/skills/update-status/scripts/set-board.sh" <path-to-story-file> planner`.
+  `bash "${CLAUDE_PLUGIN_ROOT}/skills/update-status/scripts/set-zone.sh" <path-to-story-file> planner`.
 
 A declined part is left exactly as it was. When nobody can answer (unattended),
-don't guess at the board — skip the offer and just do the explicit status change
+don't guess at the zone — skip the offer and just do the explicit status change
 the human asked for.
 
 ### Step 4: If the target is Done, gather the resolution first
