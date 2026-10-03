@@ -9,8 +9,8 @@ the Free Software Foundation, either version 3 of the License, or
 (in each plugin's own repo).
 
 This file is the same, by hand, in every lbecjx plugin that participates
-in the ecosystem (currently `local-backlog` and `workflow-dev`) — no
-plugin's copy is more authoritative than another's; each is just a
+in the ecosystem — no plugin's copy is more authoritative than another's;
+each is just a
 hardcoded duplicate. There is no fetch, no pull, no shared runtime copy:
 editing this contract means editing it in every plugin's repo, in the
 same sitting, and bumping **Version** below so the two can be compared by
@@ -19,7 +19,7 @@ eye. See "Changing this file."
 
 # lbecjx Plugins Ecosystem
 
-**Version:** 0.0.2 — **Last updated:** 2026-10-03T04:25:19Z (UTC, `date -u
+**Version:** 0.0.4 — **Last updated:** 2026-10-03T14:27:47Z (UTC, `date -u
 +%Y-%m-%dT%H:%M:%SZ`, never typed or estimated). Bump both on every
 content change (see "Changing this file"). There is no automated way to
 tell a plugin's copy is stale; **Version** is the drift check compared by
@@ -58,59 +58,21 @@ this exact file at its repo root.
 ## Detecting another plugin's presence
 
 There is no API for "is plugin X installed/enabled right now." The only
-practical signal is a file each plugin is already known to leave on disk.
-
-| Plugin | Presence marker |
-|---|---|
-| `local-backlog` | `local-backlog/.backlog-config.json` exists at the repo root |
-| `workflow-dev` | `.workflow-dev/context/REPO.md` exists at the repo root |
-
-A calling skill checks the marker for the plugin it wants to reach. If the
+practical signal is a file the other plugin is already known to leave on
+disk — a config file, a marker it writes on first use, anything stable.
+A calling skill states, in its own "ECOSYSTEM SECTION," which specific
+file it checks for and which specific plugin that file indicates. If the
 marker is absent, the integration is skipped entirely and the skill
 continues exactly as it would standalone — no warning, no degraded mode,
 nothing left half-done.
 
-## Contracts
-
-This is a **registry, not a rulebook** — what exists, why, and where to
-find the actual rule. The operative trigger/presence-check/action lives
-**only** in the calling skill's own file (its "ECOSYSTEM SECTION"), so it
-runs as a normal part of that skill's flow instead of depending on anyone
-reading this document at the right moment. Nothing here should ever be
-the only place a rule is written down — if you're implementing a contract
-and the rule only exists in this file, it's in the wrong place.
-
-### Contract #1 — start a story
-
-- **Participants:** `workflow-dev` (caller) → `local-backlog` (called)
-- **What happens:** when `workflow-dev:init` starts a story whose source
-  is a `local-backlog` file, it transitions that story to `In Progress`
-  via `local-backlog:update-status` — instead of leaving it at
-  `Not Started` for the entire time it's actively worked on.
-- **Why this exists:** without it, `update-status`'s own "propose In
-  Progress + Planner" step (`local-backlog`'s `LB-0008`) never gets a
-  chance to fire, because nothing ever calls `update-status` mid-story.
-  Reported from the `backlog-viewer` project: two stories (`BV-0001`,
-  `BV-0003`) went straight from `Not Started` to `Done` and never reached
-  the Planner board. Tracked as `LB-0018` in `local-backlog`'s backlog.
-- **Implemented in:** `workflow-dev`'s `skills/init/SKILL.md`, Phase
-  1-alt step 0 — see that file for the exact trigger and presence check.
-- **Status:** ✅ implemented.
-
-### Contract #2 — close a story
-
-- **Participants:** `workflow-dev` (caller) → `local-backlog` (called)
-- **What happens:** when `workflow-dev` finishes a story whose source is
-  a `local-backlog` file, it transitions that story to its terminal
-  status via `local-backlog:update-status`, instead of leaving the file
-  for a human to update by hand afterward.
-- **Why this exists:** same gap as Contract #1, at the other end of a
-  story's life — a story closed only in `workflow-dev`'s own context
-  files never reflects that in its `local-backlog` story file either.
-- **Implemented in:** nowhere yet. ⬜ not yet implemented on either side
-  — noted here so the shape is decided once, consistently with Contract
-  #1, rather than improvised later.
-- **Status:** ⬜ not implemented.
+This file never names a specific plugin, a specific marker file, or a
+specific contract — doing so would make this copy diverge from what every
+other `lbecjx` plugin needs, defeating the point of it being identical
+everywhere. All of that — which plugins exist, what each one's presence
+marker is, what contracts exist between which plugins, what each one does
+and why — lives only in the calling skill's own "ECOSYSTEM SECTION," in
+whichever plugin actually implements it.
 
 ## Changing this file
 
@@ -128,6 +90,18 @@ and the rule only exists in this file, it's in the wrong place.
 
 ## Version History
 
+- **0.0.4** (2026-10-03T14:27:47Z) — Removed the presence-marker table
+  and the Contracts section entirely — both named specific plugins
+  (`local-backlog`, `workflow-dev`), which this file must never do: it
+  has to stay byte-identical across any `lbecjx` plugin, present or
+  future, with zero edits needed to adopt a new one. Which plugins
+  exist, each one's presence marker, and what contracts exist between
+  them now live only in the calling skill's own "ECOSYSTEM SECTION."
+- **0.0.3** (2026-10-03T14:26:22Z) — Contracts section cut down to a bare
+  index (name, caller/called, status, pointer) — the previous
+  what/why/implemented-in bullets still restated rule content that
+  belongs only in the calling skill. Contract #1's rationale moved into
+  `workflow-dev:init`'s own ECOSYSTEM SECTION.
 - **0.0.2** (2026-10-03T04:25:19Z) — Contracts section rewritten as a
   registry, not a rulebook: dropped the Trigger/Presence
   check/Action-style bullets (they duplicated the operative rule already
