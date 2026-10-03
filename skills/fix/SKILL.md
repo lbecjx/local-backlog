@@ -62,9 +62,10 @@ Don't start guessing before you know what "broken" means here.
    a. Tell the human this project is on the legacy folder name and offer to migrate.
    b. Show exactly what migration does before doing it: `git mv backlog local-backlog`
       (or a plain `mv` if the folder isn't tracked), then update every story file's
-      own footer line to say `local-backlog/` instead. Get confirmation first —
+      own footer line (`> Generated with ... To work on it: /workflow-dev:init
+      backlog/<CODE>-....md`) to say `local-backlog/` instead. Get confirmation first —
       this touches every story file, even though the edit itself is mechanical and
-      identical each time. Read ECOSYSTEM SECTION.
+      identical each time.
    c. If `.backlog-config.json` doesn't yet have a `gitignored` field (it predates that
       mechanism), ask the human the same question `/local-backlog:create-story`'s Phase 1
       would ask on first use — gitignored or tracked — rather than leaving it unset. See
@@ -197,14 +198,3 @@ Step 2 is exhausted.
 Tell the human what was found, what was fixed (and confirmed), and anything
 still open that needs their decision. Keep it concrete — cite the actual file
 and the actual problem, not a generic "fixed some issues."
-
-## ECOSYSTEM SECTION
-
-Full contract and how-to: see `../../ECOSYSTEM.md`.
-
-References (informational text only, no automated behavior):
-- Step 2, item 1b: migrating off the legacy `backlog/` folder name rewrites
-  every story file's own footer line, whose exact current text is
-  `> Generated with ... To work on it: /workflow-dev:init
-  backlog/<CODE>-....md` — the `backlog/` path segment in that quoted line
-  is what gets rewritten to `local-backlog/`.
