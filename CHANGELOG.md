@@ -14,6 +14,21 @@ All notable changes to this plugin are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/), versioning follows
 [Semantic Versioning](https://semver.org/).
 
+## 1.10.0
+
+- Zone (Backlog/Planner/Archive) is now a field on the story itself — a
+  `| **Zone** |` row, same as `Status`/`Resolution`/`Note` — instead of
+  membership in a separate `local-backlog/.backlog-board.json`. That file is
+  retired entirely: `get-board.sh`/`set-board.sh` are replaced by
+  `get-zone.sh`/`set-zone.sh`, which read and write the story file directly.
+- `/local-backlog:fix` backfills `Zone` on every story from an existing
+  `.backlog-board.json` and deletes it once every story is migrated
+  (`migrate-zone-field.sh`, replacing `migrate-board-archive.sh`).
+- The bundled viewer still reads/writes `.backlog-board.json` until its own
+  companion change (`backlog-viewer`'s `BV-0007`) ships and this plugin's
+  vendored `dist/` is rebuilt from it — that re-vendor is a separate,
+  follow-up release.
+
 ## 1.9.1
 
 - `/local-backlog:update-status` now keeps a story's file mode, and removes its

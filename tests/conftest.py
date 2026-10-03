@@ -44,7 +44,6 @@ class Scratch:
         (self.backlog / ".backlog-config.json").write_text(
             json.dumps({"prefix": "QA", "lastCode": 0, "gitignored": True})
         )
-        (self.backlog / ".backlog-board.json").write_text(json.dumps({"planner": [], "archive": []}))
 
         self.stage = tmp_path / "stage"
         self.stage.mkdir()
@@ -95,9 +94,6 @@ Test story.
     def history_of(self, code):
         text = (self.backlog / f"{code}-story.md").read_text()
         return [line for line in text.splitlines() if line.startswith("- ")]
-
-    def board(self):
-        return json.loads((self.backlog / ".backlog-board.json").read_text())
 
 
 @pytest.fixture
