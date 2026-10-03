@@ -99,8 +99,11 @@ Apply each accepted part with its own script — never silently:
   `bash "${CLAUDE_PLUGIN_ROOT}/skills/update-status/scripts/set-zone.sh" <path-to-story-file> planner`.
 
 A declined part is left exactly as it was. When nobody can answer (unattended),
-don't guess at the zone — skip the offer and just do the explicit status change
-the human asked for.
+don't skip the offer silently — apply **both** parts by default, same as the
+resolution and note below: `In Progress` plus `set-zone.sh ... planner`. The
+"Yes" default above exists for exactly this case, not just for display order;
+an unattended run that only writes `Status` and leaves `Zone` to drift behind
+it is the same silent gap this step exists to close.
 
 ### Step 4: If the target is Done, gather the resolution first
 
@@ -205,6 +208,11 @@ stale or wrong.
   invent one they declined); with nobody to ask, the agent infers a one-line
   note and writes it, so the change isn't silent. Optional and unattended are
   not in conflict: they are the two halves of the same rule.
+- **Starting a story moves it to Planner too, unattended or not** — a human
+  may decline the Planner-board part of Step 3's offer; with nobody to ask,
+  both parts default to Yes. A story that's `In Progress` but still sitting
+  in `backlog` because no one was there to answer is the same silent drift
+  this rule exists to prevent everywhere else.
 - **Real clock, not a guess** — the timestamp always comes from `date -u`
   inside the script, never typed or estimated.
 - **History is append-only** — past entries are never edited or removed, even
