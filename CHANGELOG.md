@@ -14,6 +14,12 @@ All notable changes to this plugin are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/), versioning follows
 [Semantic Versioning](https://semver.org/).
 
+## 1.11.0
+
+- `ECOSYSTEM.md` documents how `lbecjx` plugins detect and call each other.
+- `/local-backlog:update-status`, run with nobody to answer, now also adds a
+  started story to the Planner board.
+
 ## 1.10.0
 
 - Zone (Backlog/Planner/Archive) is now a field on the story itself — a
