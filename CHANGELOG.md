@@ -14,6 +14,13 @@ All notable changes to this plugin are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/), versioning follows
 [Semantic Versioning](https://semver.org/).
 
+## 1.12.0
+
+- The bundled viewer now reads a story's `Zone` from the story's own
+  `| **Zone** |` row instead of `.backlog-board.json`, matching 1.10.0's move of
+  the zone onto the story. Zone changes still go through `/api/board`.
+  Re-vendored from `backlog-viewer` 0.6.0.
+
 ## 1.11.0
 
 - `ECOSYSTEM.md` documents how `lbecjx` plugins detect and call each other.
