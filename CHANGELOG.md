@@ -14,6 +14,15 @@ All notable changes to this plugin are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/), versioning follows
 [Semantic Versioning](https://semver.org/).
 
+## 1.13.0
+
+- Add a `SessionStart` hook that lists stories still `Not Started` when a session
+  opens in a project using this plugin.
+- On OpenCode, where `hooks/hooks.json` is not read, the same list is delivered
+  by `opencode/plugin.ts`.
+- The hook reads only this plugin's `local-backlog/` data, is silent without
+  `local-backlog/.backlog-config.json` or outside a genuine startup session, and never writes.
+
 ## 1.12.0
 
 - The bundled viewer now reads a story's `Zone` from the story's own

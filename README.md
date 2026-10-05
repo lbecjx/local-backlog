@@ -1,6 +1,6 @@
 # local-backlog
 
-For [Claude Code](https://code.claude.com) projects without access to a cloud-based issue tracker: create and manage stories as plain Markdown files, with auto-incrementing ticket codes and a searchable local viewer.
+For [Claude Code](https://code.claude.com) and OpenCode projects without access to a cloud-based issue tracker: create and manage stories as plain Markdown files, with auto-incrementing ticket codes and a searchable local viewer.
 
 "Local" means no external service dependency — not necessarily private. `/local-backlog:create-story` asks once, on first use in a project, whether to gitignore the backlog or commit it with the rest of the repo — the right choice depends on whether the repo itself is meant to be shared (a maintainer's own working notes usually shouldn't ship to a plugin's/library's end users) or is a project where the backlog is legitimate shared documentation.
 
@@ -26,6 +26,36 @@ Its source is a separate, independently versioned project: [`lbecjx/backlog-view
 /plugin marketplace add lbecjx/claude-plugins
 /plugin install local-backlog@lbecjx
 ```
+
+### OpenCode
+
+OpenCode has no marketplace step: the skills and the plugin are installed
+separately, by hand. Clone the plugin, link each skill into OpenCode's skills
+directory, and link the plugin entry point (OpenCode auto-loads plugins from
+`~/.config/opencode/plugins/`, and this checkout sits one level below it):
+
+```
+mkdir -p ~/.config/opencode/plugins/lbecjx ~/.config/opencode/skills
+
+git clone https://github.com/lbecjx/local-backlog \
+  ~/.config/opencode/plugins/lbecjx/local-backlog
+
+for s in ~/.config/opencode/plugins/lbecjx/local-backlog/skills/*/; do
+  ln -sfn "../plugins/lbecjx/local-backlog/skills/$(basename "$s")" \
+          "$HOME/.config/opencode/skills/local-backlog-$(basename "$s")"
+done
+
+ln -sfn ~/.config/opencode/plugins/lbecjx/local-backlog/opencode/plugin.ts \
+        ~/.config/opencode/plugins/local-backlog.ts
+```
+
+The links use `-sfn`: `-f` replaces a link that is already there instead of
+failing, and `-n` keeps the target's own symlink from being followed, so
+re-running the block after an update is safe. The session-start list is delivered
+by `opencode/plugin.ts` — `hooks/hooks.json` is Claude Code's format, which
+OpenCode does not read — so there is one copy of the text and not two that can
+drift. After a change to the plugin, run `opencode service restart`: the
+background service caches each plugin's load result.
 
 ## Recommended alongside this plugin
 
