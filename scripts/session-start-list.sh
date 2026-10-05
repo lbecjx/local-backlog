@@ -21,12 +21,33 @@
 
 set -u
 
+# Two modes, one text (mirrors workflow-dev's session-start-check.sh):
+#   session-start-list.sh              Claude Code SessionStart — reads the
+#                                      payload on stdin, emits the JSON envelope.
+#   session-start-list.sh --message [payload]
+#                                      prints the same text plain, and nothing
+#                                      otherwise. OpenCode's plugin
+#                                      (opencode/plugin.ts) calls this; that
+#                                      harness has no SessionStart event, so the
+#                                      plugin passes the payload as an argument
+#                                      and owns the "once per session" half.
+MODE="hook"
+PAYLOAD_ARG=""
+case "${1:-}" in
+  --message) MODE="message"; PAYLOAD_ARG="${2:-}" ;;
+esac
+
+if [[ "$MODE" == "message" && -n "$PAYLOAD_ARG" ]]; then
+  INPUT="$PAYLOAD_ARG"
+else
+  INPUT=$(cat)
+fi
+
 # --- Session gate -------------------------------------------------------------
 # Act only on a genuinely new session: `source` is "startup" for those and
 # resume/clear/compact otherwise, so the list is not repeated mid-conversation.
 # The field is `source`, not `session_start_reason` — the wrong name never
 # matches Claude Code's actual input and makes the whole hook a silent no-op.
-INPUT=$(cat)
 SOURCE=$(printf '%s' "$INPUT" | grep -o '"source"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4)
 [[ "$SOURCE" == "startup" ]] || exit 0
 
@@ -116,9 +137,14 @@ fi
 # Fields are cleaned on the way in; this is the final guarantee, so a malformed
 # row can never emit invalid JSON. Tab (011) and newline (012) are kept: the
 # newline pass below handles the latter and nothing else carries the former.
-TEXT=$(printf '%s' "$TEXT" | tr -d '"\\' | LC_ALL=C tr -d '\000-\010\013\014\016-\037')
+TEXT=$(printf '%s' "$TEXT" | tr -d '"\\' | LC_ALL=C tr -d '\000-\010\013-\037')
 
-# One copy of the text, wrapped for Claude Code. JSON cannot carry a raw
-# newline, so each one becomes `\n`; the text holds no `"` or `\` to escape.
-printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}' \
-  "$(printf '%s' "$TEXT" | awk 'NR > 1 { printf "\\n" } { printf "%s", $0 }')"
+# One copy of the text, two envelopes: `--message` prints it plain for
+# OpenCode's plugin, hook mode wraps it for Claude Code. JSON cannot carry a
+# raw newline, so each one becomes `\n`; the text holds no `"` or `\` to escape.
+if [[ "$MODE" == "message" ]]; then
+  printf '%s' "$TEXT"
+else
+  printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}' \
+    "$(printf '%s' "$TEXT" | awk 'NR > 1 { printf "\\n" } { printf "%s", $0 }')"
+fi

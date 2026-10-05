@@ -68,6 +68,15 @@ def run_hook(repo, source="startup"):
     )
 
 
+def run_message(repo, payload='{"source":"startup"}'):
+    return subprocess.run(
+        [str(HOOK), "--message", payload],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
+
+
 def context_of(result):
     payload = json.loads(result.stdout)
     return payload["hookSpecificOutput"]["additionalContext"]
@@ -257,6 +266,48 @@ def test_silent_when_the_zone_script_is_missing(tmp_path):
         capture_output=True,
         text=True,
     )
+
+    assert result.returncode == 0
+    assert result.stdout == ""
+
+
+def test_message_mode_prints_plain_text(tmp_path):
+    repo, backlog = make_project(tmp_path)
+    write_story(backlog, "QA-0001")
+
+    result = run_message(repo)
+
+    assert result.returncode == 0
+    assert result.stdout.startswith("local-backlog — stories not started:")
+    assert not result.stdout.startswith("{")
+    assert "| QA-0001 |" in result.stdout
+
+
+def test_message_mode_is_silent_without_the_marker(tmp_path):
+    repo, backlog = make_project(tmp_path, marker=False)
+    write_story(backlog, "QA-0001")
+
+    result = run_message(repo)
+
+    assert result.returncode == 0
+    assert result.stdout == ""
+
+
+def test_message_mode_is_silent_on_a_non_startup_source(tmp_path):
+    repo, backlog = make_project(tmp_path)
+    write_story(backlog, "QA-0001")
+
+    result = run_message(repo, '{"source":"resume"}')
+
+    assert result.returncode == 0
+    assert result.stdout == ""
+
+
+def test_message_mode_is_silent_when_nothing_is_not_started(tmp_path):
+    repo, backlog = make_project(tmp_path)
+    write_story(backlog, "QA-0001", status="Done")
+
+    result = run_message(repo)
 
     assert result.returncode == 0
     assert result.stdout == ""

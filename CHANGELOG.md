@@ -18,6 +18,8 @@ All notable changes to this plugin are documented here. Format loosely follows
 
 - Add a `SessionStart` hook that lists stories still `Not Started` when a session
   opens in a project using this plugin.
+- On OpenCode, where `hooks/hooks.json` is not read, the same list is delivered
+  by `opencode/plugin.ts`.
 - The hook reads only this plugin's `local-backlog/` data, is silent without
   `local-backlog/.backlog-config.json` or outside a genuine startup session, and never writes.
 
