@@ -14,6 +14,15 @@ All notable changes to this plugin are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/), versioning follows
 [Semantic Versioning](https://semver.org/).
 
+## 1.15.0
+
+- `open-backlog` prints `PROJECT:<name>` and `ROOT:<path>` alongside
+  `OPENED:`/`STORIES:`, and the skill states the project name in its report.
+- `open-backlog` asks which project to open when the conversation points at a
+  different project than the cwd-resolved one and both have a `local-backlog/`.
+- Add `--resolve-only` to report the resolution without opening anything.
+- Add `--root <path>` to open a specific project's backlog.
+
 ## 1.14.1
 
 - Fix the bundled viewer showing "Failed to list …/local-backlog/: 404": the
