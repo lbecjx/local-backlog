@@ -53,20 +53,65 @@ would. Do not paste the script's contents inline instead of calling the file
 
 The script does all of it in order: finds the repo root and its `local-backlog/`
 folder, checks for `python3`, stages the pre-built viewer into a per-project
-temp directory with the real `local-backlog/` symlinked in live as `backlog/`
-(the path the bundled viewer's own code expects — an internal staging detail,
-not the project-facing folder name), starts (or reuses)
+temp directory with the real `local-backlog/` symlinked in live (the path the
+bundled viewer's own code expects — an internal staging detail, not a second
+folder), starts (or reuses)
 the local server, and opens it in the default browser. On Windows, it uses a
 directory junction (`mklink /J`, no admin rights needed) instead of a symlink,
 and falls back to `xcopy /E /I` if that fails — that copy won't reflect future
 edits until the skill is re-run, which is worth telling the human if it happens.
+
+### Which project? (disambiguation)
+
+The cwd the script resolves can drift from the project the human believes they
+are working in — an earlier `cd` into a sibling checkout, a monorepo
+subdirectory whose own git root differs, a stale cwd from earlier in a long
+session. Opening the wrong backlog that way is silent, so work out the target
+*before* opening anything.
+
+1. Ask the script what it would resolve, without opening anything:
+
+   ```bash
+   bash "<skill-base-dir>/scripts/open-backlog.sh" --resolve-only
+   ```
+
+   It prints `PROJECT:<name>`, `ROOT:<path>`, `STORIES:<n>`, or an early-exit
+   token. If it prints `NO_PYTHON3`, report that and stop — nothing can be
+   served without Python 3, so there is nothing to disambiguate. `NO_BACKLOG`
+   means the cwd-resolved project has no backlog; a project named in the
+   conversation still might (step 2).
+
+2. Build the candidate set: (a) the project `--resolve-only` reported, if it
+   reported one, plus (b) any other project path already named in this
+   conversation (an earlier `cd`, a file read under a project, a repo the human
+   named by path). Keep a candidate only if `<path>/local-backlog/` exists
+   directly under it. Do **not** search the filesystem for other projects — if
+   the conversation never pointed anywhere else, there is no ambiguity.
+
+3. Then:
+   - **0 candidates** → report `NO_BACKLOG` (see below).
+   - **exactly 1** → open it — the fixed command above if it is the
+     cwd-resolved one, otherwise the `--root` form below.
+   - **more than 1** → ask the human which to open with the harness's question
+     tool (OpenCode `question`, Claude Code `AskUserQuestion`), one option per
+     candidate showing the project name and its path, and open only the chosen
+     one — quote the path, it is conversation-derived and may contain spaces or
+     shell metacharacters:
+
+     ```bash
+     bash "<skill-base-dir>/scripts/open-backlog.sh" --root "<chosen-path>"
+     ```
+
+`--resolve-only` and `--root <path>` are additive to the fixed command; the
+first use of each may prompt once for permission. The no-argument command stays
+the primary invocation and its behavior is unchanged.
 
 Read the script's own output to know what happened, then report to the human:
 
 - **`NO_BACKLOG`** → there is no backlog yet; suggest `/local-backlog:create-story`. Do NOT create an empty folder just to open an empty viewer.
 - **`NO_PYTHON3`** → "This viewer needs Python 3 to serve the app locally (it discovers stories live over HTTP, unlike a single static file). Install it from python.org or your system's package manager, then try again." Do not attempt to install anything yourself.
 - **`NO_FREE_PORT`** → tell the human no port was free after 20 attempts, don't loop forever.
-- **`OPENED:<port>` / `STORIES:<n>`** → tell the human how many stories are in `local-backlog/`, the URL that was opened, and that it's a live server — editing a story and refreshing the page is enough, no need to re-run this skill (only re-run it if the server needs restarting, e.g. after a reboot). Keep it to two or three lines — the browser window is the real output.
+- **`OPENED:<port>` / `STORIES:<n>` / `PROJECT:<name>` / `ROOT:<path>`** → always state which project was opened (`PROJECT:<name>`, and `ROOT:<path>` when the project was chosen with `--root`) — never omit it, even when everything looks routine; it is how a wrong-project open is caught. Then tell the human how many stories are in `local-backlog/`, the URL that was opened, and that it's a live server — editing a story and refreshing the page is enough, no need to re-run this skill (only re-run it if the server needs restarting, e.g. after a reboot). Keep it to two or three lines — the browser window is the real output.
 
 ## What the viewer does
 

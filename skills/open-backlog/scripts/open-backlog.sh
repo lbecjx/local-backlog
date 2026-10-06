@@ -12,20 +12,73 @@
 # permission system recognize the same command across runs, instead of
 # re-prompting on every invocation for an inline script whose content is
 # never byte-identical twice.
+#
+# The no-argument form above is that fixed command. Two additive shapes exist
+# for the disambiguation flow (see SKILL.md): `--resolve-only` reports what
+# would be opened without opening it, and `--root <path>` opens a specific
+# project's backlog instead of resolving one from git/pwd.
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DIST_DIR="$(cd "$SCRIPT_DIR/.." && pwd)/dist"
 
-REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-if [ ! -d "$REPO_ROOT/local-backlog" ]; then
+RESOLVE_ONLY=0
+ROOT_OVERRIDE=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --resolve-only)
+      RESOLVE_ONLY=1
+      shift
+      ;;
+    --root)
+      if [ $# -lt 2 ] || [ -z "$2" ]; then
+        echo "--root requires a non-empty path" >&2
+        exit 2
+      fi
+      ROOT_OVERRIDE="$2"
+      shift 2
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [ -n "$ROOT_OVERRIDE" ]; then
+  # --root bypasses git/pwd resolution, but the same direct-child rule below
+  # still applies to the path it names. Non-absolute operands are prefixed with
+  # "./" so a leading-dash value can never be read as an option by `cd` — even
+  # `cd -- -` still treats a bare `-` as $OLDPWD.
+  case "$ROOT_OVERRIDE" in
+    /*) REPO_ROOT="$(cd -- "$ROOT_OVERRIDE" 2>/dev/null && pwd)" || REPO_ROOT="" ;;
+    *) REPO_ROOT="$(cd -- "./$ROOT_OVERRIDE" 2>/dev/null && pwd)" || REPO_ROOT="" ;;
+  esac
+else
+  REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+fi
+if [ -z "$REPO_ROOT" ] || [ ! -d "$REPO_ROOT/local-backlog" ]; then
   echo "NO_BACKLOG"
   exit 0
 fi
 
 if ! command -v python3 >/dev/null 2>&1; then
   echo "NO_PYTHON3"
+  exit 0
+fi
+
+# Computed once and reused — the viewer header (project.json below) and the
+# PROJECT: stdout line must never be two separate derivations of the same name.
+PROJECT_NAME="$(basename "$REPO_ROOT")"
+STORIES="$(ls "$REPO_ROOT"/local-backlog/*.md 2>/dev/null | wc -l | tr -d ' ')"
+
+# --resolve-only reports what would be opened and exits — no staging, no
+# server, no browser — so the caller can ask the human which project first.
+if [ "$RESOLVE_ONLY" -eq 1 ]; then
+  echo "PROJECT:$PROJECT_NAME"
+  echo "ROOT:$REPO_ROOT"
+  echo "STORIES:$STORIES"
   exit 0
 fi
 
@@ -54,7 +107,6 @@ cp "$SCRIPT_DIR/../../create-story/references/story-model.json" "$STAGE/story-mo
 # at a glance — see backlog-viewer's own project.json fetch. JSON-encoded via
 # python3 (already required above) rather than hand-built, since a repo
 # folder name can legally contain a `"` or `\`.
-PROJECT_NAME="$(basename "$REPO_ROOT")"
 python3 -c 'import json, sys; json.dump({"name": sys.argv[1]}, sys.stdout)' "$PROJECT_NAME" > "$STAGE/project.json"
 
 PORT=""
@@ -83,4 +135,6 @@ fi
 open "http://localhost:$PORT/" 2>/dev/null || xdg-open "http://localhost:$PORT/" 2>/dev/null
 
 echo "OPENED:$PORT"
-echo "STORIES:$(ls "$REPO_ROOT"/local-backlog/*.md 2>/dev/null | wc -l | tr -d ' ')"
+echo "STORIES:$STORIES"
+echo "PROJECT:$PROJECT_NAME"
+echo "ROOT:$REPO_ROOT"

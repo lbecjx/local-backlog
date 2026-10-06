@@ -43,6 +43,8 @@ inside a file named after the server.
 `set-zone.sh`). `test_fix_scripts.py` covers the `fix` skill's repair scripts
 (including the one `update-status.sh` invocation that belongs to a `fix`
 flow). `test_story_model.py` ties the story model to the template and the
-scripts. `test_session_start_hook.py` and `test_opencode_plugin.py` cover the
+scripts. `test_open_backlog_script.py` covers `open-backlog.sh`'s resolution
+reporting (`PROJECT:`/`ROOT:`) and its `--resolve-only` / `--root <path>`
+shapes. `test_session_start_hook.py` and `test_opencode_plugin.py` cover the
 SessionStart hook and its OpenCode delivery; `scripts/opencode-plugin.test.sh`
 is that path's node harness.
