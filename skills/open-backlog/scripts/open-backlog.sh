@@ -33,11 +33,12 @@ HASH=$(printf '%s' "$REPO_ROOT" | shasum | cut -c1-12)
 STAGE="${TMPDIR:-/tmp}/local-backlog-viewer/$HASH"
 mkdir -p "$STAGE"
 cp -R "$DIST_DIR/." "$STAGE/"
-# The staged symlink is still named "backlog" (not "local-backlog") because
-# that's the path the bundled viewer's own code fetches from
-# (getBacklogBaseUrl() in backlog-viewer's source) — an internal serving
-# detail, independent of what the project's own folder is called.
-ln -sfn "$REPO_ROOT/local-backlog" "$STAGE/backlog"
+# The staged symlink is named "local-backlog" — the path the bundled viewer
+# fetches from (getBacklogBaseUrl() in backlog-viewer 0.6.0+ reads
+# /local-backlog/). It also matches the project's own folder name. Naming it
+# "backlog" left the viewer fetching a path that did not exist, so it showed
+# "Failed to list http://localhost:<port>/local-backlog/: 404".
+ln -sfn "$REPO_ROOT/local-backlog" "$STAGE/local-backlog"
 
 # The authoritative data model (a story's fields + the canonical
 # statuses/colors/resolutions) — the single source — served at the app's own

@@ -9,7 +9,7 @@
 # Shared pytest fixtures: a scratch local-backlog/ project (mirroring the
 # real story-file template) and a real idle_server.py instance running
 # against it, staged the same way open-backlog.sh actually does (a symlink
-# named "backlog" pointing at the real folder) — these tests exercise the
+# named "local-backlog" pointing at the real folder) — these tests exercise the
 # genuine server process over real HTTP, not a mocked handler, so a passing
 # test means the actual script works, not just that its logic reads right.
 
@@ -47,7 +47,7 @@ class Scratch:
 
         self.stage = tmp_path / "stage"
         self.stage.mkdir()
-        (self.stage / "backlog").symlink_to(self.backlog)
+        (self.stage / "local-backlog").symlink_to(self.backlog)
 
     def write_story(self, code, status):
         path = self.backlog / f"{code}-story.md"
@@ -118,7 +118,7 @@ def server(scratch):
         if proc.poll() is not None:
             raise RuntimeError(f"server exited early:\n{proc.stdout.read()}")
         try:
-            urllib.request.urlopen(f"{base_url}/backlog/", timeout=0.2)
+            urllib.request.urlopen(f"{base_url}/local-backlog/", timeout=0.2)
             break
         except Exception:
             time.sleep(0.1)

@@ -14,6 +14,12 @@ All notable changes to this plugin are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/), versioning follows
 [Semantic Versioning](https://semver.org/).
 
+## 1.14.1
+
+- Fix the bundled viewer showing "Failed to list …/local-backlog/: 404": the
+  open-backlog server now stages the project's data at `/local-backlog/`, the
+  path `backlog-viewer` 0.6.0 fetches, instead of `/backlog/`.
+
 ## 1.14.0
 
 - An archived story is now frozen: `update-status.sh` refuses every status change
