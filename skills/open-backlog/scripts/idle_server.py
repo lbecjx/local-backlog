@@ -101,7 +101,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         # reject the ambiguous case of two files sharing a code prefix
         # (e.g. an orphaned file left behind by a partial rename) instead of
         # silently picking one.
-        backlog_dir = os.path.join(DIRECTORY, "backlog")
+        backlog_dir = os.path.join(DIRECTORY, "local-backlog")
         return sorted(
             name for name in os.listdir(backlog_dir) if name.startswith(code + "-") and name.endswith(".md")
         )
@@ -351,7 +351,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if len(matches) > 1:
             self._send_json(500, {"error": f"{len(matches)} story files share code {code}: {', '.join(matches)}"})
             return
-        story_file = os.path.join(DIRECTORY, "backlog", matches[0])
+        story_file = os.path.join(DIRECTORY, "local-backlog", matches[0])
 
         if self.path == "/api/status":
             status = payload.get("status", "")

@@ -48,7 +48,7 @@ def _spawn_server(tmp_path, env):
         if proc.poll() is not None:
             raise RuntimeError(f"server exited early:\n{proc.stdout.read()}")
         try:
-            urllib.request.urlopen(f"{base_url}/backlog/", timeout=0.2)
+            urllib.request.urlopen(f"{base_url}/local-backlog/", timeout=0.2)
             break
         except Exception:
             time.sleep(0.1)

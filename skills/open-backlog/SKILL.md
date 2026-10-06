@@ -76,7 +76,7 @@ Read the script's own output to know what happened, then report to the human:
 - **Right panel:** the selected story rendered from its markdown, including syntax-highlighted code blocks
 
 Story discovery happens client-side via the directory listing the local
-server generates for `$STAGE/backlog/` — there's no manifest file and nothing
+server generates for `$STAGE/local-backlog/` — there's no manifest file and nothing
 to regenerate when stories change.
 
 ## Notes
