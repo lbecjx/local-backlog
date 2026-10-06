@@ -34,6 +34,26 @@ one separately.
   `/local-backlog:fix` instead; that skill handles ambiguous/invalid data,
   this one handles a normal, intentional transition
 
+## Archived stories are frozen
+
+An archived story accepts **no change at all** except unarchive. `Archive` is a
+deliberate terminal resting place for a story that was closed and taken out of
+the way — not another status it can drift out of.
+
+- Every status change is refused: `update-status.sh` exits non-zero, writes
+  nothing, and names unarchive as the only path. That includes asking for the
+  status the story is already at.
+- **Unarchive** is the one permitted move: `set-zone.sh <file> backlog` (or
+  `planner`) takes the story out of `Archive` and changes **only** the `Zone`
+  row. `Status` is left exactly as it was — still `Done` until a now-permitted
+  status change reopens it.
+- So "change an archived story" is always two moves: **unarchive first, then
+  the status change.** Never the other way around.
+- **Archiving is never automatic.** No status change archives a story — not
+  marking it `Done`, not any other transition — and nothing here invokes an
+  archive on your behalf. Archiving is the human's explicit action, and so is
+  unarchiving.
+
 ## Execution
 
 ### Step 1: Identify the story file
@@ -41,6 +61,38 @@ one separately.
 Resolve `<CODE>` to its file under `local-backlog/` (e.g. `NB-0005` →
 `local-backlog/NB-0005-*.md`) — glob on the code prefix, since the rest of the
 filename is a free-text slug. Ask if more than one file matches or none do.
+
+### Step 1b: Bulk / batch requests (several stories in one request)
+
+When the human asks to change several stories at once — "move all the Won't Do
+ones back to Not Started", "mark these three done" — the guided flow still runs
+for **every** story, but the two interactive steps collapse to one round-trip
+for the batch. This is a deliberate, stated choice, so different agents don't
+resolve it differently:
+
+- **Step 2's confirmation is asked once for the whole batch**, showing every
+  transition together before anything is written:
+  ```
+  LB-0001: Not Started → In Progress
+  LB-0004: Done → Not Started
+  LB-0009: Won't Do → Not Started
+  ```
+  Someone who can see the whole batch decides once; a per-story confirmation is
+  the round-trip a batch request is explicitly trying to avoid.
+- **Step 5's note question is asked once for the whole batch** — a single "a
+  note for these 3?" covering all of them, skip allowed. Whatever note is given
+  rides on **each** story's own `## History` line; when stories in the batch
+  need different notes, ask once with the whole set in view rather than
+  reverting to per-story round-trips.
+- **Step 4 still applies per Done target**, but if the batch closes several
+  stories ask about their resolutions in one question that lists them all, not
+  one question per story.
+- **Step 6 still runs once per story** — one atomic write each. There is no
+  batch write, and a failure on one story is reported for that story and does
+  not stop the rest.
+
+A batch request does **not** exempt any story from the guided flow — see "The
+guided flow runs every time" in Principles.
 
 ### Step 2: Confirm the target status
 
@@ -122,6 +174,17 @@ decision isn't silent.
 Moving **out of** `Done` is the opposite: no resolution applies, so don't
 ask and don't pass one — the script clears the stored `Resolution` and `Note`
 rows.
+
+A status change never touches the story's `Zone`, in **either** direction —
+only `set-zone.sh` moves a story between zones, and only when the human asks
+(Step 3's start-setup offer, or an explicit unarchive). Reopening a `Done`
+story therefore does **not** move it off the board it sits on: a story that was
+archived and is then reopened stays in `Archive` (and so stays out of the
+SessionStart list, which skips `Archive`) until the human moves it out. That is
+deliberate — Step 3 does not offer a zone move for a reopen, because doing a
+zone move the human didn't ask for is exactly the silent drift this skill
+avoids. An `Archive` story is not even reachable this way: it is frozen outright
+(see "Archived stories are frozen").
 
 The *why* is not asked here: it is the note, and it applies to every
 transition — see Step 5.
@@ -213,6 +276,24 @@ stale or wrong.
   both parts default to Yes. A story that's `In Progress` but still sitting
   in `backlog` because no one was there to answer is the same silent drift
   this rule exists to prevent everywhere else.
+- **The guided flow runs every time, for every change.** Knowing
+  `update-status.sh`'s exact invocation from an earlier, skill-guided call in
+  the same session does not make a later direct Bash call to that same script
+  equivalent to re-invoking the skill: the script does the same atomic write,
+  but Steps 2–5 — the confirmation, the start-setup offer, the resolution and
+  note questions — do not run, and that is the part a human in the loop
+  depends on. This holds for a repeat of an identical transition pattern and
+  for a bulk request; neither is an exemption. **Symmetric for starting a
+  story:** Step 3's offer (`Status → In Progress` **and** add to Planner) is
+  re-asked every time a human starts a story, even one started the same way
+  minutes earlier — an agent that already learned the two-script combo must
+  not silently replay it for the next story without going through Step 3
+  again.
+- **An archived story is frozen** — the only permitted operation is unarchive;
+  a status change (even to the status it already has) is refused, and
+  unarchive changes only the `Zone` row. Archiving is always the human's
+  explicit action, never a side effect of a status change. See "Archived
+  stories are frozen".
 - **Real clock, not a guess** — the timestamp always comes from `date -u`
   inside the script, never typed or estimated.
 - **History is append-only** — past entries are never edited or removed, even

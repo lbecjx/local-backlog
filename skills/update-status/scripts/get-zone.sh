@@ -33,11 +33,17 @@ if [[ ! -f "$STORY_FILE" ]]; then
   exit 1
 fi
 
-ZONE_VALUE=$(grep -m1 '^| \*\*Zone\*\* |' "$STORY_FILE" | sed -E 's/^\| \*\*Zone\*\* \| *//; s/ *\|$//')
+# The value's case is normalized before the match. `update-status.sh`'s own
+# archived-story guard normalizes case too (and `idle_server.py`'s does via
+# `_is_archived`), so the three Zone readers agree: a `| **Zone** | archive |`
+# row (any casing) means the same thing everywhere. The row SHAPE stays exact
+# (same grep as update-status.sh) — a hand-edited `|**Zone**|` row is not a row
+# any reader recognizes, so all three fail open to `backlog` together.
+ZONE_VALUE=$(grep -m1 '^| \*\*Zone\*\* |' "$STORY_FILE" | sed -E 's/^\| \*\*Zone\*\* \| *//; s/ *\|$//' | tr '[:upper:]' '[:lower:]')
 
 case "$ZONE_VALUE" in
-  Backlog) echo "backlog" ;;
-  Planner) echo "planner" ;;
-  Archive) echo "archive" ;;
+  backlog) echo "backlog" ;;
+  planner) echo "planner" ;;
+  archive) echo "archive" ;;
   *) echo "backlog" ;;
 esac

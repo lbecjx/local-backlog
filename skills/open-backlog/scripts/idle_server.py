@@ -120,6 +120,36 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             pass
         return None
 
+    def _read_zone(self, story_file):
+        # The row SHAPE is pinned to the canonical `| **Zone** | … |`: the two
+        # shell readers (update-status.sh's guard grep, get-zone.sh's grep)
+        # recognize exactly that prefix and nothing looser, so a hand-edited
+        # `|**Zone**|` row is unrecognized by all three readers alike. ASCII
+        # SPACES around the value are tolerated — ` *`, not `\s*`, because the
+        # shell's sed strips spaces only: a tab or NBSP adjacent to the value is
+        # unrecognized by the shell, so it must be unrecognized here too, or the
+        # HTTP guard would freeze a story the CLI guard would happily change.
+        # A character after the closing `|` is likewise unrecognized on both
+        # sides (the shell's sed anchors the final `|` at end-of-line).
+        try:
+            with open(story_file, errors="replace") as f:
+                for line in f:
+                    m = re.match(r"^\| \*\*Zone\*\* \| *(.*?) *\|$", line)
+                    if m:
+                        return m.group(1)
+        except OSError:
+            pass
+        return None
+
+    def _is_archived(self, story_file):
+        # The single decision "is this story in the Archive zone", so both guards
+        # below answer it the same way update-status.sh's own in-lock guard does.
+        # Case-insensitive: update-status.sh and get-zone.sh both normalize case,
+        # so `archive`/`ARCHIVE` count — the one reader that must NOT disagree is
+        # this one. A missing/unrecognized row reads as not-archived (fail-open).
+        zone = self._read_zone(story_file)
+        return zone is not None and zone.lower() == "archive"
+
     def _load_model(self):
         # The canonical Status and Resolution values live in the story model
         # (the single source), not in a per-project file. None on an
@@ -177,6 +207,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return False
 
     def _handle_archive(self, story_file, board_args, resolution, note):
+        # An archived story is frozen, so update-status.sh now refuses every
+        # change to one — including the Status→Done write below. Re-archiving an
+        # already-archived story must therefore not reach that refusal: answer
+        # the no-op it is. Reachable from a direct /api/board call even though
+        # the bundled viewer hides the action once a story is archived.
+        if self._is_archived(story_file):
+            self._send_json(200, {"result": f"{os.path.basename(story_file)} is already archived"})
+            return
         # AC #9: archiving a story that isn't already Done must set its
         # Status to Done. update-status.sh already no-ops cleanly ("Status
         # is already 'Done' — nothing to do.") when it's called with the
@@ -354,6 +392,13 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         story_file = os.path.join(DIRECTORY, "backlog", matches[0])
 
         if self.path == "/api/status":
+            # An archived story is frozen: update-status.sh refuses every change
+            # to one (authoritatively, inside its own lock). Surfacing that as a
+            # clean 409 here beats letting the script's refusal fall through as
+            # a 500 — this is a client mistake, not a server failure.
+            if self._is_archived(story_file):
+                self._send_json(409, {"error": f"{code} is archived — unarchive it first"})
+                return
             status = payload.get("status", "")
             if not isinstance(status, str) or not status:
                 self._send_json(400, {"error": "missing 'status'"})
