@@ -14,11 +14,25 @@ All notable changes to this plugin are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/), versioning follows
 [Semantic Versioning](https://semver.org/).
 
-## 1.13.1
+## 1.14.1
 
 - Fix the bundled viewer showing "Failed to list …/local-backlog/: 404": the
   open-backlog server now stages the project's data at `/local-backlog/`, the
   path `backlog-viewer` 0.6.0 fetches, instead of `/backlog/`.
+
+## 1.14.0
+
+- An archived story is now frozen: `update-status.sh` refuses every status change
+  on a story in the `Archive` zone, writing nothing and pointing at unarchive.
+  Unarchiving (`set-zone.sh`) changes only the `Zone` row. Archiving is never a
+  side effect of a status change, and re-archiving over HTTP is a no-op rather
+  than a 500.
+- Fix data loss in `update-status.sh` when appending to a `## History` section
+  whose last entry wrapped onto continuation lines.
+- `tests/test_update_status.py` is now the dedicated `update-status.sh` suite,
+  moved out of `tests/test_idle_server.py` and extended.
+- `/local-backlog:update-status` documents bulk/batch requests and states that
+  the guided flow runs for every change.
 
 ## 1.13.0
 
