@@ -156,6 +156,22 @@ if [[ -z "$OLD_STATUS" ]]; then
   exit 1
 fi
 
+# An archived story is frozen: the only way to change anything about it is to
+# unarchive it first (set-zone.sh ... backlog|planner). Archiving is the human's
+# explicit action (the viewer's Archive button, never a status change); this
+# guard is what stops a later status write from silently rewriting a story that
+# was meant to be closed and out of the way. Read from the story's own
+# `| **Zone** |` row (the value get-zone.sh reads), inside the lock, so a
+# concurrent unarchive cannot slip between this check and the write below. A
+# missing or unrecognized row reads as `backlog` — the same fail-open default
+# used everywhere zone is read. `tr` (not bash 4's ${v,,}) because macOS ships
+# bash 3.2.
+STORY_ZONE=$(grep -m1 '^| \*\*Zone\*\* |' "$STORY_FILE" | sed -E 's/^\| \*\*Zone\*\* \| *//; s/ *\|$//')
+if [[ "$(printf '%s' "$STORY_ZONE" | tr '[:upper:]' '[:lower:]')" == "archive" ]]; then
+  echo "$STORY_FILE is archived — unarchive it first (set-zone.sh \"$STORY_FILE\" backlog|planner); an archived story accepts no changes." >&2
+  exit 1
+fi
+
 # Compare-and-swap precondition (see --expect above): checked here, inside the
 # lock, so no concurrent write can slip between this check and the write below.
 if [[ -n "$EXPECT" && "$OLD_STATUS" != "$EXPECT" ]]; then
@@ -315,15 +331,24 @@ if ! NEW_STATUS="$NEW_STATUS" TODAY="$TODAY" HISTORY_LINE="$HISTORY_LINE" RESOLU
     in_history = 0
     next
   }
+  # A wrapped continuation line of the entry above — indented, so it is neither
+  # a new `- ` entry nor the blank line that ends the block. Print it and keep
+  # the section open. Without this rule the branch below fired on the FIRST
+  # continuation line instead: it appended the new transition there (splitting
+  # the old entry in two) and `next`ed without printing, so the continuation
+  # line was DELETED. Reproduced 2026-10-05 against an LB-0016 History block —
+  # real data loss, and the whole point of this plugin is that a status change
+  # never loses story content.
+  in_history && saw_entry && $0 != "" && /^[[:space:]]/ { print; next }
   in_history && saw_entry {
     # The entry block ended without a blank line after it — a trailing `---`,
-    # another heading, anything. Append the line HERE, before that line, rather
-    # than dropping it or letting it land outside `## History`. Without this the
-    # transition (and now the note, which rides entirely on this line) was lost
-    # while the script still printed `Appended: …` and exited 0.
+    # another heading, anything. Append the new line HERE, before that line,
+    # rather than dropping it or letting it land outside `## History`. There is
+    # deliberately no `next`: matching this branch means the line here is that
+    # terminator, and the old `next` dropped it — the same bug that ate a
+    # continuation line, one level up.
     if (history_line != "") print history_line
     in_history = 0
-    next
   }
   in_history && $0 != "" {
     # Same, for a section that has NO entry yet (a malformed story). `saw_entry`

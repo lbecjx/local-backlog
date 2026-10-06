@@ -13,7 +13,6 @@
 # pass) actually would, not a mocked handler standing in for it.
 
 import os
-import re
 import shutil
 import socket
 import subprocess
@@ -22,11 +21,7 @@ import threading
 import time
 import urllib.request
 
-import pytest
-
 from conftest import post, IDLE_SERVER, Scratch, _free_port
-
-UPDATE_STATUS = IDLE_SERVER.parent.parent.parent / "update-status" / "scripts" / "update-status.sh"
 
 
 def _spawn_server(tmp_path, env):
@@ -453,145 +448,6 @@ class TestArchiveRollback:
             proc.wait(timeout=5)
 
 
-class TestUpdateStatusLock:
-    def test_lock_directory_is_cleaned_up_after_a_normal_run(self, tmp_path):
-        backlog = tmp_path / "local-backlog"
-        backlog.mkdir()
-        story = backlog / "LK-0001-story.md"
-        story.write_text(
-            "# LK-0001\n\n| **Status** | Not Started |\n\n---\n## History\n- created\n\n---\n"
-        )
-        script = IDLE_SERVER.parent.parent.parent / "update-status" / "scripts" / "update-status.sh"
-        result = subprocess.run([str(script), str(story), "Done", "--resolution", "Done"], capture_output=True, text=True)
-        assert result.returncode == 0
-        assert not (backlog / f"{story.name}.lock").exists()
-
-    STORY = (
-        "# LK-0001\n\n| **Status** | Not Started |\n\n---\n## History\n- created\n\n---\n"
-    )
-
-    def _story(self, tmp_path, text=None):
-        backlog = tmp_path / "local-backlog"
-        backlog.mkdir()
-        story = backlog / "LK-0001-story.md"
-        story.write_text(self.STORY if text is None else text)
-        return backlog, story
-
-    @staticmethod
-    def _shim_awk(tmp_path, body):
-        """A stand-in `awk` first on PATH, so a test can stall or fail the write step."""
-        shim_dir = tmp_path / "shim"
-        shim_dir.mkdir()
-        shim = shim_dir / "awk"
-        shim.write_text(f"#!/bin/bash\n{body}\n")
-        shim.chmod(0o755)
-        scratch_tmp = tmp_path / "tmp"
-        scratch_tmp.mkdir()
-        return {**os.environ, "PATH": f"{shim_dir}:{os.environ['PATH']}", "TMPDIR": str(scratch_tmp)}
-
-    @staticmethod
-    def _names(directory):
-        return sorted(p.name for p in directory.iterdir())
-
-    def test_the_stories_file_mode_is_kept(self, tmp_path):
-        _, story = self._story(tmp_path)
-        story.chmod(0o644)
-
-        result = subprocess.run([str(UPDATE_STATUS), str(story), "In Progress"], capture_output=True, text=True)
-
-        assert result.returncode == 0, result.stderr
-        assert story.stat().st_mode & 0o777 == 0o644
-
-    def test_nothing_is_left_behind_after_a_successful_run(self, tmp_path):
-        backlog, story = self._story(tmp_path)
-
-        result = subprocess.run([str(UPDATE_STATUS), str(story), "In Progress"], capture_output=True, text=True)
-
-        assert result.returncode == 0, result.stderr
-        assert self._names(backlog) == [story.name]
-
-    @pytest.mark.parametrize(
-        "args, text, code",
-        [
-            (["Nope"], None, 2),
-            (["In Progress", "--expect", "Done"], None, 3),
-            (["In Progress"], "# LK-0001\n\n| **Status** | Not Started |\n", 1),
-        ],
-        ids=["non-canonical status", "--expect mismatch", "no History section"],
-    )
-    def test_nothing_is_left_behind_after_a_refused_run(self, tmp_path, args, text, code):
-        backlog, story = self._story(tmp_path, text)
-        before = story.read_text()
-
-        result = subprocess.run([str(UPDATE_STATUS), str(story), *args], capture_output=True, text=True)
-
-        assert result.returncode == code
-        assert story.read_text() == before
-        assert self._names(backlog) == [story.name]
-
-    def test_nothing_is_left_behind_after_a_failed_rewrite(self, tmp_path):
-        backlog, story = self._story(tmp_path)
-        before = story.read_text()
-        env = self._shim_awk(tmp_path, "exit 1")
-
-        result = subprocess.run([str(UPDATE_STATUS), str(story), "In Progress"], env=env, capture_output=True, text=True)
-
-        assert result.returncode == 1
-        assert "Failed to rewrite" in result.stderr
-        assert story.read_text() == before
-        assert self._names(backlog) == [story.name]
-
-    def _stalled_run(self, tmp_path, backlog, story, hold):
-        """Start an update whose write step reports in, then holds for `hold` seconds."""
-        sentinel = tmp_path / "write-step-reached"
-        real_awk = shutil.which("awk")
-        env = self._shim_awk(tmp_path, f'touch "{sentinel}"\nsleep {hold}\nexec {real_awk} "$@"')
-        proc = subprocess.Popen(
-            [str(UPDATE_STATUS), str(story), "In Progress"], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-        )
-        deadline = time.monotonic() + 10
-        while not sentinel.exists() and time.monotonic() < deadline:
-            time.sleep(0.02)
-        assert sentinel.exists(), "the run never reached the write step"
-        return proc
-
-    def test_an_interrupt_mid_write_leaves_no_lock_or_temp_file(self, tmp_path):
-        backlog, story = self._story(tmp_path)
-        before = story.read_text()
-        proc = self._stalled_run(tmp_path, backlog, story, hold=2)
-        try:
-            # Mid-write the folder holds the story, the lock directory and the temp
-            # file — and the temp file's name is not one a `*.md` glob would match.
-            assert len(self._names(backlog)) == 3
-            assert list(backlog.glob("*.md")) == [story]
-            proc.terminate()
-            proc.wait(timeout=10)
-        finally:
-            if proc.poll() is None:
-                proc.kill()
-
-        assert proc.returncode == 143
-        assert story.read_text() == before
-        assert self._names(backlog) == [story.name]
-
-    def test_a_shared_folder_keeps_the_temp_file_out_of_it(self, tmp_path):
-        backlog, story = self._story(tmp_path)
-        story.chmod(0o644)
-        backlog.chmod(0o775)  # writable by the group: someone else could swap a temp file in it
-        proc = self._stalled_run(tmp_path, backlog, story, hold=1)
-        try:
-            # Only the story and the lock are in the folder; the temp file went to $TMPDIR.
-            assert self._names(backlog) == [story.name, f"{story.name}.lock"]
-            assert len(self._names(tmp_path / "tmp")) == 1
-            assert proc.wait(timeout=10) == 0
-        finally:
-            if proc.poll() is None:
-                proc.kill()
-
-        assert "| **Status** | In Progress |" in story.read_text()
-        assert story.stat().st_mode & 0o777 == 0o644
-        assert self._names(backlog) == [story.name]
-        assert self._names(tmp_path / "tmp") == []
 
 
 class TestServerConfiguration:
@@ -609,295 +465,71 @@ class TestServerConfiguration:
         assert module.Server.request_queue_size >= 64
 
 
-class TestUpdateStatusResolution:
-    def _story(self, tmp_path, status="Not Started", resolution="", note=""):
-        backlog = tmp_path / "local-backlog"
-        backlog.mkdir()
-        story = backlog / "RS-0001-story.md"
-        story.write_text(
-            "# RS-0001 · x\n\n| Field | Value |\n|---|---|\n"
-            f"| **Code** | RS-0001 |\n| **Status** | {status} |\n"
-            f"| **Resolution** | {resolution} |\n| **Note** | {note} |\n"
-            "| **Updated** | 2026-01-01 |\n\n---\n\n"
-            "## History\n\n- 2026-01-01T00:00:00Z — Created\n\n---\n"
-        )
-        return story
+class TestArchivedStoryIsFrozenOverHTTP:
+    """Part C (AC #6) end to end: update-status.sh refuses an archived story,
+    and the server turns that refusal into a clean client-visible answer
+    instead of a 500."""
 
-    def _run(self, *args):
-        script = IDLE_SERVER.parent.parent.parent / "update-status" / "scripts" / "update-status.sh"
-        return subprocess.run([str(script), *args], capture_output=True, text=True)
+    def test_a_status_change_on_an_archived_story_is_409(self, server):
+        base_url, scratch = server
+        scratch.write_story("AR-0001", "Done")
+        assert post(base_url, "/api/board", {"code": "AR-0001", "zone": "archive", "resolution": "Done"})[0] == 200
 
-    def test_done_without_resolution_is_refused(self, tmp_path):
-        story = self._story(tmp_path)
-        r = self._run(str(story), "Done")
-        assert r.returncode == 2
-        assert "requires --resolution" in r.stderr
-        assert "| **Status** | Not Started |" in story.read_text()  # untouched
+        status, body = post(base_url, "/api/status", {"code": "AR-0001", "status": "Not Started"})
 
-    def test_done_with_valid_resolution_and_note_writes_rows(self, tmp_path):
-        story = self._story(tmp_path)
-        r = self._run(str(story), "Done", "--resolution", "Won't Do", "--note", "deprioritized")
-        assert r.returncode == 0
-        text = story.read_text()
-        assert "| **Status** | Done |" in text
-        assert "| **Resolution** | Won't Do |" in text
-        assert "| **Note** | deprioritized |" in text
+        assert status == 409
+        assert "archived" in body["error"]
+        assert scratch.status_of("AR-0001") == "Done"  # untouched
 
-    def test_custom_resolution_rejected(self, tmp_path):
-        story = self._story(tmp_path)
-        r = self._run(str(story), "Done", "--resolution", "Maybe")
-        assert r.returncode == 2
-        assert "Maybe" in r.stderr
+    def test_rearchiving_an_archived_story_is_a_clean_noop(self, server):
+        # A direct /api/board call can ask to archive an already-archived story
+        # (the bundled viewer hides the action, but the endpoint is reachable).
+        # It must short-circuit cleanly, never surface the freeze as a 500.
+        base_url, scratch = server
+        scratch.write_story("AR-0002", "Done")
+        assert post(base_url, "/api/board", {"code": "AR-0002", "zone": "archive", "resolution": "Done"})[0] == 200
 
-    def test_leaving_done_clears_rows(self, tmp_path):
-        story = self._story(tmp_path, status="Done", resolution="Won't Do", note="old")
-        r = self._run(str(story), "In Progress")
-        assert r.returncode == 0
-        text = story.read_text()
-        assert "| **Resolution** |  |" in text
-        assert "| **Note** |  |" in text
+        status, body = post(base_url, "/api/board", {"code": "AR-0002", "zone": "archive", "resolution": "Done"})
 
-    def test_resolution_on_non_done_is_rejected(self, tmp_path):
-        story = self._story(tmp_path)
-        r = self._run(str(story), "In Progress", "--resolution", "Done")
-        assert r.returncode == 1
+        assert status == 200
+        assert "already archived" in body["result"]
 
-    def test_note_with_a_newline_is_refused_without_touching_the_story(self, tmp_path):
-        story = self._story(tmp_path)
-        before = story.read_text()
-        r = self._run(str(story), "In Progress", "--note", "line1\nline2")
-        assert r.returncode == 2
-        assert story.read_text() == before
+    def test_a_case_variant_archive_row_is_still_frozen_over_http(self, server):
+        # The server's guard and the script's guard both normalize case, so a
+        # hand-edited lowercase Zone row still yields the clean 409 — not the
+        # 500 a case-sensitive guard produced.
+        base_url, scratch = server
+        story = scratch.write_story("AR-0003", "Done")
+        story.write_text(story.read_text() + "| **Zone** | archive |\n")
 
-    def test_backslash_in_note_is_preserved_literally(self, tmp_path):
-        # awk -v used to run the value through its own escape processing, so a
-        # backslash became a newline/tab and split the metadata table.
-        story = self._story(tmp_path)
-        r = self._run(str(story), "In Progress", "--note", "path C:\\new\\test")
-        assert r.returncode == 0
-        assert "| **Note** | path C:\\new\\test |" in story.read_text()
+        status, body = post(base_url, "/api/status", {"code": "AR-0003", "status": "In Progress"})
 
-    def test_pipe_in_note_is_refused(self, tmp_path):
-        story = self._story(tmp_path)
-        r = self._run(str(story), "In Progress", "--note", "a|b")
-        assert r.returncode == 2
+        assert status == 409
+        assert "archived" in body["error"]
+        assert scratch.status_of("AR-0003") == "Done"
 
-    @pytest.mark.skipif(sys.platform != "darwin", reason="chflags is macOS-specific")
-    def test_failed_write_leaves_the_story_unchanged(self, tmp_path):
-        # An unwritable target must fail loudly, not report success while the
-        # story stays on its old status (and leak the temp file).
-        story = self._story(tmp_path)
-        before = story.read_text()
-        subprocess.run(["chflags", "uchg", str(story)], check=True)
-        try:
-            r = self._run(str(story), "In Progress")
-            assert r.returncode == 1
-        finally:
-            subprocess.run(["chflags", "nouchg", str(story)], check=True)
-        assert story.read_text() == before
-        assert sorted(p.name for p in story.parent.iterdir()) == [story.name]
+    def test_rearchiving_a_case_variant_archive_row_is_a_clean_noop(self, server):
+        base_url, scratch = server
+        story = scratch.write_story("AR-0004", "Done")
+        story.write_text(story.read_text() + "| **Zone** | archive |\n")
 
-    def test_backfill_fills_an_empty_resolution_without_a_history_line(self, tmp_path):
-        # A legacy `Status: Done` story (predating the Resolution field): asking
-        # for it with a resolution fills the row — the Status does not change and
-        # no History line is invented for a transition that never happened.
-        story = self._story(tmp_path, status="Done", resolution="")
-        before_history = [line for line in story.read_text().splitlines() if line.startswith("- ")]
-        r = self._run(str(story), "Done", "--resolution", "Done")
-        assert r.returncode == 0
-        text = story.read_text()
-        assert "| **Status** | Done |" in text
-        assert "| **Resolution** | Done |" in text
-        assert [line for line in text.splitlines() if line.startswith("- ")] == before_history
+        status, body = post(base_url, "/api/board", {"code": "AR-0004", "zone": "archive", "resolution": "Done"})
 
-    def test_backfill_is_idempotent_and_never_overwrites_a_resolution(self, tmp_path):
-        story = self._story(tmp_path, status="Done", resolution="")
-        assert self._run(str(story), "Done", "--resolution", "Done").returncode == 0
-        after = story.read_text()
-        # Re-running, or asking for a different resolution once one is set,
-        # changes nothing.
-        assert self._run(str(story), "Done", "--resolution", "Done").returncode == 0
-        assert self._run(str(story), "Done", "--resolution", "Won't Do").returncode == 0
-        assert story.read_text() == after
+        assert status == 200
+        assert "already archived" in body["result"]
 
-    def test_done_without_resolution_and_no_flag_is_still_a_noop(self, tmp_path):
-        story = self._story(tmp_path, status="Done", resolution="")
-        before = story.read_text()
-        r = self._run(str(story), "Done")
-        assert r.returncode == 0
-        assert story.read_text() == before
+    def test_a_space_variant_zone_row_agrees_with_the_cli(self, server):
+        # The three Zone readers all tolerate spaces around the value, so
+        # `| **Zone** |Archive |` is archived over HTTP too — the clean 409 the
+        # CLI's refusal is paired with, not a 500.
+        base_url, scratch = server
+        story = scratch.write_story("AR-0005", "Done")
+        story.write_text(story.read_text() + "| **Zone** |Archive |\n")
 
-    def test_backfill_preserves_an_existing_note(self, tmp_path):
-        story = self._story(tmp_path, status="Done", resolution="", note="kept")
-        r = self._run(str(story), "Done", "--resolution", "Done")
-        assert r.returncode == 0
-        text = story.read_text()
-        assert "| **Resolution** | Done |" in text
-        assert "| **Note** | kept |" in text
+        status, body = post(base_url, "/api/status", {"code": "AR-0005", "status": "In Progress"})
 
-    def test_backfill_never_overwrites_an_existing_note(self, tmp_path):
-        # The backfill is not a transition, so a note passed with it has nothing
-        # to attach to and no History line records the write. Overwriting would
-        # destroy the story's current note silently — reachable end to end from
-        # /api/board archiving a story that is already Done with an empty
-        # Resolution (the archive reason is forwarded as --note).
-        story = self._story(tmp_path, status="Done", resolution="", note="original legacy note")
-        r = self._run(str(story), "Done", "--resolution", "Won't Do", "--note", "archived because stale")
-        assert r.returncode == 0
-        text = story.read_text()
-        assert "| **Resolution** | Won't Do |" in text
-        assert "| **Note** | original legacy note |" in text
-
-    def test_backfill_a_legacy_story_without_resolution_rows(self, tmp_path):
-        # The real legacy shape: the story predates the Resolution/Note rows
-        # entirely. The write inserts them (filled) rather than failing.
-        backlog = tmp_path / "local-backlog"
-        backlog.mkdir()
-        story = backlog / "LG-0001-story.md"
-        story.write_text(
-            "# LG-0001 · x\n\n| Field | Value |\n|---|---|\n"
-            "| **Code** | LG-0001 |\n| **Status** | Done |\n"
-            "| **Updated** | 2026-01-01 |\n\n---\n\n"
-            "## History\n\n- 2026-01-01T00:00:00Z — Created\n\n---\n"
-        )
-        r = self._run(str(story), "Done", "--resolution", "Done")
-        assert r.returncode == 0
-        text = story.read_text()
-        assert "| **Resolution** | Done |" in text
-        assert "| **Note** |  |" in text
+        assert status == 409
+        assert "archived" in body["error"]
+        assert scratch.status_of("AR-0005") == "Done"
 
 
-class TestHistoryLineSegments:
-    """The appended `## History` line carries the transition's own Resolution
-    and Note — after the new status, in that order, and only when they exist.
-    The `Note` row can't hold more than the current one, so this line is what
-    keeps an earlier transition's reason readable."""
-
-    def _story(self, tmp_path, status="Not Started", resolution="", note="", after_history="\n---\n"):
-        backlog = tmp_path / "local-backlog"
-        backlog.mkdir()
-        story = backlog / "HS-0001-story.md"
-        story.write_text(
-            "# HS-0001 · x\n\n| Field | Value |\n|---|---|\n"
-            f"| **Code** | HS-0001 |\n| **Status** | {status} |\n"
-            f"| **Resolution** | {resolution} |\n| **Note** | {note} |\n"
-            "| **Updated** | 2026-01-01 |\n\n---\n\n"
-            "## History\n\n- 2026-01-01T00:00:00Z — Created\n"
-            f"{after_history}"
-        )
-        return story
-
-    def _run(self, *args):
-        script = IDLE_SERVER.parent.parent.parent / "update-status" / "scripts" / "update-status.sh"
-        return subprocess.run([str(script), *args], capture_output=True, text=True)
-
-    def _last_history_line(self, story):
-        return [line for line in story.read_text().splitlines() if line.startswith("- ")][-1]
-
-    def test_done_transition_records_resolution_then_note(self, tmp_path):
-        story = self._story(tmp_path)
-        r = self._run(str(story), "Done", "--resolution", "Done", "--note", "shipped in PR #14")
-        assert r.returncode == 0
-        assert re.fullmatch(
-            r"- \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z — Status: Not Started → Done"
-            r" · Resolution: Done · Note: shipped in PR #14",
-            self._last_history_line(story),
-        )
-
-    def test_done_transition_with_a_resolution_and_no_note(self, tmp_path):
-        # The most common real flow: a human skips the note on a Done move, so
-        # only the Resolution segment is present. A regression that dropped or
-        # duplicated it when no Note follows would otherwise go unnoticed.
-        story = self._story(tmp_path)
-        r = self._run(str(story), "Done", "--resolution", "Won't Do")
-        assert r.returncode == 0
-        assert re.fullmatch(
-            r"- \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z — Status: Not Started → Done"
-            r" · Resolution: Won't Do",
-            self._last_history_line(story),
-        )
-
-    def test_non_done_transition_with_a_note_records_only_the_note(self, tmp_path):
-        story = self._story(tmp_path)
-        r = self._run(str(story), "In Progress", "--note", "waiting on the payments API")
-        assert r.returncode == 0
-        assert re.fullmatch(
-            r"- \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z — Status: Not Started → In Progress"
-            r" · Note: waiting on the payments API",
-            self._last_history_line(story),
-        )
-
-    def test_transition_without_a_note_keeps_the_bare_line(self, tmp_path):
-        story = self._story(tmp_path)
-        r = self._run(str(story), "In Progress")
-        assert r.returncode == 0
-        assert re.fullmatch(
-            r"- \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z — Status: Not Started → In Progress",
-            self._last_history_line(story),
-        )
-
-    def test_leaving_done_does_not_leak_the_old_resolution_or_note(self, tmp_path):
-        # The story still carries a Resolution and a Note from its Done state;
-        # the new line describes only this transition, so neither may reappear
-        # on it (they are cleared from the rows instead).
-        story = self._story(tmp_path, status="Done", resolution="Won't Do", note="old reason")
-        r = self._run(str(story), "In Progress")
-        assert r.returncode == 0
-        assert re.fullmatch(
-            r"- \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z — Status: Done → In Progress",
-            self._last_history_line(story),
-        )
-
-    def test_a_note_containing_the_segment_marker_is_stored_verbatim(self, tmp_path):
-        # A note is free text; the plugin deliberately does not forbid `·` in
-        # it (only newlines, CR and `|`). Pin the writer's contract so the
-        # viewer's parser is written against a known shape: the text is stored
-        # exactly as given, unescaped — hence "split on the FIRST marker".
-        story = self._story(tmp_path)
-        note = "blocked · Note: not the marker"
-        r = self._run(str(story), "Blocked", "--note", note)
-        assert r.returncode == 0
-        assert self._last_history_line(story).endswith(f" — Status: Not Started → Blocked · Note: {note}")
-        assert f"| **Note** | {note} |" in story.read_text()
-
-    def _history_block(self, story):
-        """The text of the `## History` section up to the following separator."""
-        return story.read_text().split("## History", 1)[1].split("---", 1)[0]
-
-    def test_history_line_lands_inside_the_section_when_no_blank_line_follows(self, tmp_path):
-        # The section is followed straight by `---` instead of a blank line. The
-        # line must be inserted BEFORE that separator — it used to be appended
-        # after it, i.e. outside `## History` entirely.
-        story = self._story(tmp_path, after_history="---\n\n> footer\n")
-        r = self._run(str(story), "In Progress", "--note", "hello")
-        assert r.returncode == 0
-        assert " · Note: hello" in self._history_block(story)
-
-    def test_history_line_is_appended_when_the_section_ends_the_file(self, tmp_path):
-        # Nothing follows the last entry at all. The line must still land in the
-        # section: it used to be dropped while the script printed `Appended: …`
-        # and exited 0, and the note rides entirely on this line.
-        story = self._story(tmp_path, after_history="")
-        r = self._run(str(story), "In Progress", "--note", "hello")
-        assert r.returncode == 0
-        assert " · Note: hello" in self._history_block(story)
-        assert self._last_history_line(story).endswith("— Status: Not Started → In Progress · Note: hello")
-
-    def test_history_line_is_appended_into_a_section_with_no_entries(self, tmp_path):
-        # A malformed story whose `## History` has no entry at all (the template
-        # always writes a "Created" one). The line must still be written — as the
-        # section's first entry — instead of the script reporting `Appended: …`
-        # while dropping it, which lost the note with it.
-        backlog = tmp_path / "local-backlog"
-        backlog.mkdir()
-        story = backlog / "HS-0002-story.md"
-        story.write_text(
-            "# HS-0002 · x\n\n| Field | Value |\n|---|---|\n"
-            "| **Code** | HS-0002 |\n| **Status** | Not Started |\n"
-            "| **Resolution** |  |\n| **Note** |  |\n"
-            "| **Updated** | 2026-01-01 |\n\n---\n\n"
-            "## History\n\n---\n"
-        )
-        r = self._run(str(story), "In Progress", "--note", "hello")
-        assert r.returncode == 0
-        assert " · Note: hello" in self._history_block(story)

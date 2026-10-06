@@ -147,3 +147,18 @@ def test_set_zone_fails_loudly_with_no_zone_or_note_row_to_anchor_on(tmp_path):
     assert result.returncode != 0
     assert "neither a" in result.stderr
     assert story.read_text() == before
+
+
+def test_get_zone_accepts_a_case_variant_archive(tmp_path):
+    # get-zone.sh normalizes case, matching update-status.sh's archive guard and
+    # idle_server.py's _is_archived — so a hand-edited lowercase `archive` row
+    # means "archived" to every Zone reader, not just some of them.
+    backlog = tmp_path / "local-backlog"
+    backlog.mkdir()
+    story = write_story(backlog, "GB-0001")
+    story.write_text(story.read_text() + "| **Zone** | archive |\n")
+
+    result = get_zone(story)
+
+    assert result.returncode == 0
+    assert result.stdout.strip() == "archive"
