@@ -39,6 +39,13 @@ regression, and the Step 3 start combo (`Status → In Progress` plus
 from `test_idle_server.py` in LB-0016, where they had grown a second home
 inside a file named after the server.
 
+`test_create_story.py` covers `create-story`'s `write-story.sh`, which assigns a
+story's code at write time: a code another session already took is skipped, the
+counter is re-read under the lock and never moves back, a batch gets
+consecutive free codes and is all or nothing, `{{CODE:<n>}}` resolves to a
+sibling's final code, concurrent runs get unique codes, an existing file is
+never overwritten, and a bad argument, config or counter writes nothing.
+
 `test_update_status_scripts.py` covers the zone reader/writer (`get-zone.sh` /
 `set-zone.sh`). `test_fix_scripts.py` covers the `fix` skill's repair scripts
 (including the one `update-status.sh` invocation that belongs to a `fix`

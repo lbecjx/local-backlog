@@ -19,7 +19,7 @@ eye. See "Changing this file."
 
 # lbecjx Plugins Ecosystem
 
-**Version:** 0.0.1 — **Last updated:** 2026-10-03T20:09:18Z (UTC, `date -u
+**Version:** 0.1.0 — **Last updated:** 2026-10-09T07:07:51Z (UTC, `date -u
 +%Y-%m-%dT%H:%M:%SZ`, never typed or estimated). Bump both on every
 content change (see "Changing this file"). There is no automated way to
 tell a plugin's copy is stale; **Version** is the drift check compared by
@@ -115,6 +115,27 @@ mechanically:
 
 A skill with no integration has no such section and no such line.
 
+## Pre-answered invocations
+
+A calling skill may answer, in the invocation's arguments, the questions the
+invoked skill would otherwise ask the human (for example a confirmation,
+an optional note, or a yes/no offer). This lets a caller that runs with no
+human to ask still invoke another plugin's skill without that skill
+stopping on a question.
+
+- **The caller** states each answer in the invocation's arguments, by the
+  name of the question it answers (`<question>: <answer>; ...`; a free-text
+  answer goes last and runs to the end of the arguments), and
+  records in its own context that it answered for the human. Only the
+  caller decides when to pre-answer; the reason (a run mode, for example)
+  stays on the caller's side and is never passed.
+- **The invoked skill** does not ask a question the invocation already
+  answers, and applies that answer as if the human had given it. It still
+  asks anything left unanswered. An invocation with no answers behaves
+  exactly as before.
+- Nothing else crosses the boundary. The invoked skill never reads the
+  caller's files and never needs to know why the answers were given.
+
 ## Changing this file
 
 1. Edit this file, including bumping **Version**, setting **Last updated**
@@ -131,6 +152,8 @@ A skill with no integration has no such section and no such line.
 
 ## Version History
 
+- **0.1.0** (2026-10-09T07:07:51Z)
+  - Pre-answered invocations: a caller may answer the invoked skill's questions in the invocation, and the invoked skill does not ask them again.
 - **0.0.1** (2026-10-03T20:09:18Z)
   - Plugins integrate only by invoking each other's skills, with no hard dependency.
   - Two generic presence checks and a markers table, one row per plugin.

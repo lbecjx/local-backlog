@@ -94,6 +94,48 @@ resolve it differently:
 A batch request does **not** exempt any story from the guided flow — see "The
 guided flow runs every time" in Principles.
 
+### Step 1c: Pre-answered invocations (another skill already answered)
+
+Another plugin's skill may invoke this one with answers to its questions
+already in the arguments, per `ECOSYSTEM.md`, "Pre-answered invocations" —
+typically because it runs with nobody to ask. The answers come as
+`<question>: <answer>` pairs separated by `;`, after the code and the target
+status. `note:`, when present, comes last and runs to the end of the
+arguments, so a note may itself contain `;` or `:`. This skill recognizes
+three:
+
+| Answer | Question it replaces | Values |
+|---|---|---|
+| `Planner board: yes\|no` | Step 3's "Add to the Planner board" part | `yes` / `no` |
+| `resolution: <value>` | Step 4's resolution question | a canonical resolution |
+| `note: <text>` | Step 5's note question | one short line |
+
+Example: `/local-backlog:update-status LB-0018 "In Progress" Planner board: yes; note: Started from workflow-dev init`.
+
+**The target status is an answer too.** A skill-to-skill invocation names the
+story and the target status explicitly, so it answers Step 2's confirmation
+(show it as a statement, never as a question) and, when the target is
+`In Progress`, part (a) of Step 3's offer. Only part (b) is left for
+`Planner board:` to answer.
+
+- **Don't ask what is already answered.** Apply each answer exactly as if the
+  human had given it, and still run every step of the guided flow: a
+  pre-answer replaces a question, not the step around it.
+- **Ask what is left.** A question the invocation does not answer is asked as
+  usual (or falls back to its unattended default when nobody is there).
+- **An invalid answer is not an answer.** A `resolution` outside the canonical
+  list, a `Planner board` value other than yes/no, or a key given twice
+  before `note:` is treated as missing: ask it, or report it when nobody can
+  answer. Never guess what it meant.
+- **No answers, no change.** An invocation without any answers behaves exactly
+  as before.
+- **A pre-answered invocation does not ask about the file.** If Step 1 finds
+  no file or more than one for the code, stop and report it to the caller
+  instead of asking: the caller named the story, so a mismatch is the
+  caller's to resolve.
+- Do not look for why the answers were given. The caller keeps its reasons on
+  its own side, and this skill reads nothing of the caller's.
+
 ### Step 2: Confirm the target status
 
 If the human said something like "mark it as done", map that to the story's
@@ -288,7 +330,8 @@ stale or wrong.
   re-asked every time a human starts a story, even one started the same way
   minutes earlier — an agent that already learned the two-script combo must
   not silently replay it for the next story without going through Step 3
-  again.
+  again. A pre-answered invocation (Step 1c) is not an exemption either: it
+  still runs every step and only skips asking what it already answers.
 - **An archived story is frozen** — the only permitted operation is unarchive;
   a status change (even to the status it already has) is refused, and
   unarchive changes only the `Zone` row. Archiving is always the human's
