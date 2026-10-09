@@ -14,6 +14,13 @@ All notable changes to this plugin are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/), versioning follows
 [Semantic Versioning](https://semver.org/).
 
+## 1.16.0
+
+- `update-status` accepts pre-answered invocations (`ECOSYSTEM.md` 0.1.0): a
+  calling skill can pass `Planner board:`, `resolution:` and `note:` answers,
+  and the skill does not ask what is already answered. An invocation with no
+  answers behaves as before.
+
 ## 1.15.0
 
 - `open-backlog` prints `PROJECT:<name>` and `ROOT:<path>` alongside
