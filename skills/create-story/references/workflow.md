@@ -115,8 +115,13 @@ persisted counter can't regress just because a file disappeared.
 
 1. Read `lastCode` from `.backlog-config.json`
 2. Next code = `lastCode + 1`, zero-padded to 4 digits (`lastCode: 7` → `<PREFIX>-0008`)
-3. Only after successfully writing the story file (Step 5), update `lastCode`
-   in the config — that way a failed attempt doesn't burn a number
+3. **That code is provisional** — it is what the draft shows. Gathering the
+   content (Step 3) can take minutes, and another session in the same project
+   (a second terminal, a worktree) can create stories in that time. If two
+   sessions both read `lastCode: 43`, and the first writes `<PREFIX>-0044` and
+   `<PREFIX>-0045` before the second writes, the second would write a duplicate
+   `<PREFIX>-0044` and save `lastCode: 44`, moving the counter back. So the
+   final code is assigned at write time by `write-story.sh` (Step 5), never here.
 4. **Deleted codes or gaps: never reused, never backfilled.** The
    counter only moves forward.
 
@@ -153,7 +158,35 @@ Examples (prefix `NB`):
 
 ### Step 5: Write and confirm
 
-Use `references/template.md`. Then report:
+Build the content from `references/template.md` and save it to a draft file
+outside `local-backlog/`, with the placeholder `{{CODE}}` wherever the story's
+own code goes (title, `Code` row, footer). Then write it with the script — never
+by hand:
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/skills/create-story/scripts/write-story.sh" <repo-root>/local-backlog <slug> <draft-file>
+```
+
+Under a lock (`local-backlog/.create-story.lock`), the script:
+
+1. Re-reads `prefix` and `lastCode` from `.backlog-config.json`, so a counter
+   another session moved since Step 2 is the one used.
+2. Takes the next number after `lastCode` with no `<PREFIX>-XXXX-*.md` file
+   (or `<PREFIX>-XXXX.md`), passing over any that are taken. This only avoids
+   collisions; the counter is still the source of the next code.
+3. Replaces every `{{CODE}}` with that code (and, in a batch, every
+   `{{CODE:<n>}}` with the code of the n-th story of the call), then creates the
+   file exclusively: it never overwrites an existing file.
+4. Saves `lastCode` as `max(lastCode on disk, code assigned)`, so the counter
+   never moves back.
+
+It prints `CREATED: <CODE> <path>`, `SKIPPED: <CODE> (taken by <file>)` for each
+code passed over, and `LASTCODE: <n>`. Exit 2 is a bad argument (an invalid
+slug, a draft without `{{CODE}}`) and exit 1 any other failure; both write
+nothing, so fix the cause and run it again. Exit 3 means the stories were
+written but the counter was not saved: tell the human, don't run it again (the
+next run skips those codes anyway). Delete the draft file afterwards, then
+report:
 
 ```
 ✅ NB-0001 created — local-backlog/NB-0001-syntax-highlighting-codeblock.md
@@ -161,6 +194,10 @@ Use `references/template.md`. Then report:
 
    Ready to build it? /workflow-dev:init local-backlog/NB-0001-syntax-highlighting-codeblock.md
 ```
+
+If the code the script assigned differs from the one the draft showed, say so in
+the report: give the final code, and say the draft's code was taken by another
+session in the meantime.
 
 If `workflow-dev` isn't present in the session, the closing note instead names
 it with a link (a discovery nudge for projects using only `local-backlog` — not a
@@ -170,10 +207,17 @@ dependency).
 
 When the human asks for several at once ("create the 3 we noted"):
 
-1. Draft all 3 in full from the context
+1. Draft all 3 in full from the context, with provisional consecutive codes.
+   When one of them mentions another ("blocked by …"), write the reference as
+   `{{CODE:<n>}}`, `<n>` being that story's position in the batch, so it follows
+   the other story to its final code
 2. Present them together, summarized, for review
-3. Write only after the OK
-4. Consecutive codes, in the order the human mentioned them
+3. Write only after the OK, with **one** `write-story.sh` call that takes one
+   `<slug> <draft-file>` pair per story, in the order the human mentioned them.
+   The script re-reads the counter once for the whole batch, assigns consecutive
+   free codes from there, and saves `lastCode` once at the end. The batch is all
+   or nothing: if one story fails, none of them is left written
+4. Report each story's final code, and name any that moved
 
 Don't present them one at a time and wait for confirmation between each — that's
 friction with no value once the human already said "create the 3."

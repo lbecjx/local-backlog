@@ -120,12 +120,12 @@ number. A persisted counter can't regress just because a file disappeared.
 1. Read `lastCode` from `.backlog-config.json` (see Phase 1 step 4 for what to do
    if it's missing)
 2. Next code = `lastCode + 1`, zero-padded to 4 digits (`lastCode: 7` → `<PREFIX>-0008`)
-3. After successfully writing the story file (Phase 4), update the config with the
-   new `lastCode` — do this as the last step, so a failed/aborted write doesn't
-   burn a number
-4. For a batch of N stories in one request: increment in memory for each one, then
-   persist the final `lastCode` once at the end (see "Creating several stories at once")
-5. **Never reuse a code, ever** — not for a deleted file, not to fill a gap left by
+3. **This code is provisional.** It is what the draft shows while the story is
+   discussed, which can take minutes. Another session working in the same
+   project can take that code in the meantime, so the final code is assigned
+   only when the file is written (Phase 4), by a script that re-reads the
+   counter at that moment. Never write the file or the counter by hand.
+4. **Never reuse a code, ever** — not for a deleted file, not to fill a gap left by
    one. Gaps are permanent. The counter only moves forward.
 
 ### Phase 3: Gather the story content
@@ -147,15 +147,39 @@ If several fields are already clear from context, present a **complete draft** a
 ### Phase 4: Write the file
 
 1. Filename: `local-backlog/<PREFIX>-XXXX-brief-description.md`
-   - `brief-description` is kebab-case, in the language the human is writing in, max ~5 words
+   - `brief-description` is the slug: kebab-case, in the language the human is
+     writing in, max ~5 words, lowercase ASCII only (`a-z`, `0-9`, `-`)
    - Example (prefix `NB`): `NB-0001-syntax-highlighting-codeblock.md`
-2. Use the template from `references/template.md` — its `Resolution` and `Note` rows stay empty at creation; `/local-backlog:update-status` fills them later
-3. Fill every section — mark genuinely unknown items with ⬜ rather than inventing content
+2. Build the content from the template in `references/template.md` — its
+   `Resolution` and `Note` rows stay empty at creation; `/local-backlog:update-status`
+   fills them later. Fill every section — mark genuinely unknown items with ⬜
+   rather than inventing content.
+3. Write the content to a draft file outside `local-backlog/` (e.g. one made with
+   `mktemp`). Wherever the story's own code goes — the title, the `Code` row, the
+   `/workflow-dev:init local-backlog/<CODE>-<slug>.md` line in the footer — write
+   the placeholder `{{CODE}}` instead of the provisional code.
+4. Write the story with the script, which assigns the final code:
+   ```bash
+   bash "${CLAUDE_PLUGIN_ROOT}/skills/create-story/scripts/write-story.sh" <repo-root>/local-backlog <slug> <draft-file>
+   ```
+   Inside a lock, it re-reads `prefix` and `lastCode` from `.backlog-config.json`,
+   takes the next number with no `<PREFIX>-XXXX-*.md` file, replaces every
+   `{{CODE}}` with it, creates the file without ever overwriting an existing one,
+   and saves `lastCode` as the larger of the value on disk and the code it
+   assigned, so the counter never moves back. It prints `CREATED: <CODE> <path>`,
+   a `SKIPPED: <CODE> (taken by <file>)` line for each code it passed over, and
+   `LASTCODE: <n>`. Exit 2 means a bad argument (an invalid slug, a draft without
+   `{{CODE}}`) and exit 1 any other failure; in both cases nothing was written, so
+   fix the cause and run it again. Exit 3 means the story was written but the
+   counter could not be saved: tell the human, and don't run it again.
+5. Delete the draft file.
 
 ### Phase 5: Confirm
 
 Tell the human:
-- The code assigned and the file path
+- The code assigned and the file path — the ones `write-story.sh` printed. If that
+  code differs from the one shown in the draft, say so: give the final code and
+  say the one in the draft was taken by another session in the meantime
 - A one-line summary of what was captured
 - How to move forward — **conditioned on what's available**:
   - If `workflow-dev` **is present in this session** (its skills/commands are
@@ -172,9 +196,17 @@ Tell the human:
 
 If the human asks for multiple stories in one go (e.g. "create the 3 pending ones we noted"):
 
-- Assign consecutive codes in the order the human listed them, incrementing `lastCode` in memory for each one (don't re-read the config between them)
+- Draft them with provisional consecutive codes, in the order the human listed them
 - Present all of them as one batch for review before writing, not one at a time
-- Write the files only after approval, then persist the final `lastCode` to the config in a single update
+- When one story of the batch mentions another (e.g. "blocked by …"), write that
+  reference as `{{CODE:<n>}}`, where `<n>` is the other story's position in the
+  batch (1 for the first), so it gets that story's final code
+- After approval, write the whole batch with **one** `write-story.sh` call, one
+  `<slug> <draft-file>` pair per story in the same order. The script re-reads the
+  counter once for the batch, assigns consecutive free codes from there (skipping
+  any number already taken), and saves `lastCode` once at the end. The batch is
+  all or nothing: on a failure no story of it is left written
+- In the confirmation, report each story's final code, and name any that moved
 
 ## Principles
 
